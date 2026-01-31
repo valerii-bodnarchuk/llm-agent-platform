@@ -2,16 +2,27 @@
   "name": "payment-processing-system",
   "version": "1.0.0",
   "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "devDependencies": {
+    "@nestjs/cli": "^11.0.16",
     "@types/node": "^25.1.0",
-    "prisma": "^7.3.0",
+    "dotenv": "^17.2.3",
+    "prisma": "^5.22.0",
     "typescript": "^5.9.3"
+  },
+  "scripts": {
+    "start": "nest start",
+    "start:dev": "nest start --watch",
+    "build": "nest build"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.1.12",
+    "@nestjs/core": "^11.1.12",
+    "@nestjs/platform-express": "^11.1.12",
+    "@prisma/client": "^5.22.0",
+    "reflect-metadata": "^0.2.2"
   }
 }
