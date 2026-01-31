@@ -8,9 +8,13 @@
   "description": "",
   "devDependencies": {
     "@nestjs/cli": "^11.0.16",
+    "@nestjs/testing": "^11.1.12",
+    "@types/jest": "^30.0.0",
     "@types/node": "^25.1.0",
     "dotenv": "^17.2.3",
+    "jest": "^30.2.0",
     "prisma": "^5.22.0",
+    "ts-jest": "^29.4.6",
     "typescript": "^5.9.3"
   },
   "scripts": {
