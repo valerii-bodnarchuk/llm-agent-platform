@@ -11,11 +11,16 @@
     "@nestjs/testing": "^11.1.12",
     "@types/jest": "^30.0.0",
     "@types/node": "^25.1.0",
+    "@types/stripe": "^8.0.416",
     "dotenv": "^17.2.3",
     "jest": "^30.2.0",
     "prisma": "^5.22.0",
     "ts-jest": "^29.4.6",
+    "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
   },
   "scripts": {
     "start": "nest start",
@@ -26,7 +31,9 @@
     "@nestjs/common": "^11.1.12",
     "@nestjs/core": "^11.1.12",
     "@nestjs/platform-express": "^11.1.12",
+    "@nestjs/swagger": "^11.2.5",
     "@prisma/client": "^5.22.0",
-    "reflect-metadata": "^0.2.2"
+    "reflect-metadata": "^0.2.2",
+    "stripe": "^20.3.0"
   }
 }
