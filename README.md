@@ -28,3 +28,17 @@ Building in public - tracking daily progress below.
 - Designed ledger schema (accounts, transactions, entries)
 - Set up Prisma with PostgreSQL
 - Implemented double-entry bookkeeping foundation
+
+### Jan 31, 2026
+- Initial project setup with NestJS, Prisma, PostgreSQL
+- Designed double-entry ledger database schema (accounts, transactions, entries)
+- Implemented LedgerService with transaction validation
+- Added unit tests for ledger balance validation
+- Set up Jest with TypeScript support
+
+### Feb 1, 2026
+- Designed double-entry ledger schema
+- Integrated Stripe Payment Intent API
+- Implemented webhook handler for payment completion
+- Added Swagger documentation
+- Created seed data for testing
