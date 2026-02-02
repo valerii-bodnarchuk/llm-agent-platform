@@ -48,4 +48,24 @@ export class LedgerService {
       return transaction;
     });
   }
+
+  async releasePayout(params: {
+    amount: number;
+    escrowAccountId: number;
+    sellerAccountId: number;
+    platformFeeAccountId: number;
+    platformFeePercent: number;
+  }) {
+    const fee = params.amount * (params.platformFeePercent / 100);
+    const sellerAmount = params.amount - fee;
+
+    return this.createTransaction({
+      description: `Payout to seller (${params.amount}, fee: ${fee})`,
+      entries: [
+        { accountId: params.escrowAccountId, amount: params.amount, type: 'DEBIT' },
+        { accountId: params.sellerAccountId, amount: sellerAmount, type: 'CREDIT' },
+        { accountId: params.platformFeeAccountId, amount: fee, type: 'CREDIT' },
+      ],
+    });
+  }
 }

@@ -7,11 +7,19 @@ async function main() {
     data: { name: 'Test Buyer', type: 'BUYER' },
   });
 
+  const seller = await prisma.account.create({
+    data: { name: 'Test Seller', type: 'SELLER' },
+  });
+
   const escrow = await prisma.account.create({
     data: { name: 'Platform Escrow', type: 'ESCROW' },
   });
 
-  console.log('Created accounts:', { buyer, escrow });
+  const platformFee = await prisma.account.create({
+    data: { name: 'Platform Fee', type: 'PLATFORM_FEE' },
+  });
+
+  console.log('Created accounts:', { buyer, seller, escrow, platformFee });
 }
 
 main()
