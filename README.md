@@ -20,6 +20,10 @@
 - [ ] Reconciliation jobs
 - [ ] Webhook handling
 
+## Production Considerations
+- Replace autoincrement IDs with UUIDs for security
+- Use environment-specific seed data
+
 ## Development Log
 
 Building in public - tracking daily progress below.
