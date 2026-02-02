@@ -30,11 +30,15 @@
     "build": "nest build"
   },
   "dependencies": {
+    "@bull-board/api": "^6.16.4",
+    "@bull-board/express": "^6.16.4",
     "@nestjs/common": "^11.1.12",
     "@nestjs/core": "^11.1.12",
     "@nestjs/platform-express": "^11.1.12",
+    "@nestjs/schedule": "^6.1.0",
     "@nestjs/swagger": "^11.2.5",
     "@prisma/client": "^5.22.0",
+    "bullmq": "^5.67.2",
     "ioredis": "^5.9.2",
     "reflect-metadata": "^0.2.2",
     "stripe": "^20.3.0"
