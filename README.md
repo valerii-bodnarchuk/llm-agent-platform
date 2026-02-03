@@ -54,3 +54,9 @@ Building in public - tracking daily progress below.
 - Created PayoutQueue and Worker for background payout processing
 - Added scheduled daily payouts with cron jobs
 - Built full payment cycle: buyer → escrow → seller with automated fee deduction
+
+### Feb 3, 2026
+- Added account balance check endpoint (GET /ledger/balance/:id)
+- Implemented insufficient funds validation for debits
+- Added transaction history endpoint (GET /ledger/transactions/:id)
+- Added accounts overview with real-time balances (GET /ledger/accounts)
