@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import Stripe from 'stripe';
+import { withRetry } from '../common/utils/retry.util';
 
 @Injectable()
 export class StripeService {
@@ -12,10 +13,14 @@ export class StripeService {
   }
 
   async createPaymentIntent(amount: number, currency: string = 'eur') {
-    return this.stripe.paymentIntents.create({
-      amount: Math.round(amount * 100), // Stripe uses cents
-      currency,
-    });
+    return withRetry(
+      () =>
+        this.stripe.paymentIntents.create({
+          amount: Math.round(amount * 100),
+          currency,
+        }),
+      { maxAttempts: 3, delayMs: 1000 },
+    );
   }
 
   getStripe() {
