@@ -60,3 +60,10 @@ Building in public - tracking daily progress below.
 - Implemented insufficient funds validation for debits
 - Added transaction history endpoint (GET /ledger/transactions/:id)
 - Added accounts overview with real-time balances (GET /ledger/accounts)
+
+### Feb 4, 2026
+- Implemented reconciliation service to sync transaction status with Stripe
+- Added hourly reconciliation for recent pending transactions (last 24h)
+- Added daily deep reconciliation for all payment transactions (3 AM)
+- Created manual reconciliation endpoints for admin operations
+- Fixed 3 stale PENDING transactions that were actually FAILED in Stripe

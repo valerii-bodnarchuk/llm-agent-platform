@@ -6,8 +6,9 @@ import { WebhookModule } from './webhook/webhook.module';
 import { PayoutModule } from './payout/payout.module';
 import { IdempotencyModule } from './idempotency/idempotency.module';
 import { QueueModule } from './queue/queue.module';
+import { ReconciliationModule } from './reconciliation/reconciliation.module';
 
 @Module({
-  imports: [QueueModule, IdempotencyModule, LedgerModule, StripeModule, PaymentModule, WebhookModule, PayoutModule],
+  imports: [ReconciliationModule, QueueModule, IdempotencyModule, LedgerModule, StripeModule, PaymentModule, WebhookModule, PayoutModule],
 })
 export class AppModule {}
