@@ -67,3 +67,11 @@ Building in public - tracking daily progress below.
 - Added daily deep reconciliation for all payment transactions (3 AM)
 - Created manual reconciliation endpoints for admin operations
 - Fixed 3 stale PENDING transactions that were actually FAILED in Stripe
+
+### Feb 5, 2026
+- Implemented API rate limiting with @nestjs/throttler
+- Configured global limit: 100 requests/minute
+- Added stricter limits for sensitive endpoints:
+  - Payments: 10 requests/minute
+  - Webhooks: 50 requests/minute
+- Rate limiting uses IP-based tracking to prevent abuse
