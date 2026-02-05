@@ -1,5 +1,6 @@
 import { Controller, Post, Body, Headers } from '@nestjs/common';
 import { ApiTags, ApiHeader } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler'; // ← используй встроенный
 import { PaymentService } from './payment.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 
@@ -9,6 +10,7 @@ export class PaymentController {
   constructor(private paymentService: PaymentService) {}
 
   @Post()
+  @Throttle({ default: { limit: 3, ttl: 60000 } }) // 3 requests per minute
   @ApiHeader({ name: 'idempotency-key', required: false })
   async createPayment(
     @Body() body: CreatePaymentDto,
