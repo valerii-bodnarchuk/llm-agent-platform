@@ -10,7 +10,7 @@ export class PaymentController {
   constructor(private paymentService: PaymentService) {}
 
   @Post()
-  @Throttle({ default: { limit: 3, ttl: 60000 } }) // 3 requests per minute
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiHeader({ name: 'idempotency-key', required: false })
   async createPayment(
     @Body() body: CreatePaymentDto,

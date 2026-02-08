@@ -7,6 +7,7 @@ import { PayoutModule } from './payout/payout.module';
 import { IdempotencyModule } from './idempotency/idempotency.module';
 import { QueueModule } from './queue/queue.module';
 import { ReconciliationModule } from './reconciliation/reconciliation.module';
+import { HealthModule } from './health/health.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 
@@ -15,11 +16,12 @@ import { APP_GUARD } from '@nestjs/core';
   imports: [
     ThrottlerModule.forRoot([
       {
-        ttl: 60000, // 60 seconds
-        limit: 100, // 100 requests per minute (global)
+        ttl: 60000,
+        limit: 100,
       },
     ]),
-    ReconciliationModule, // ← убери второй
+    HealthModule,
+    ReconciliationModule,
     QueueModule,
     IdempotencyModule,
     LedgerModule,
