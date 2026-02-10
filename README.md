@@ -204,3 +204,8 @@ Building in public — tracking progress below.
 - Added health check endpoint (GET /health) with DB + Redis monitoring
 - Fixed Prisma OpenSSL compatibility for ARM64 Docker builds
 - Cleaned up .gitignore, .dockerignore, environment config
+
+### Feb 9-10, 2026
+- Centralized Redis connection into shared RedisModule (was duplicated in 4 places)
+- IdempotencyService, PayoutQueue, PayoutProcessor, HealthController now use DI-injected RedisService
+- Single connection config, single place to change Redis host/port/password
