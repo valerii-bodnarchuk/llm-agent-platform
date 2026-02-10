@@ -1,17 +1,16 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { Worker } from 'bullmq';
 import { PayoutService } from '../payout/payout.service';
-
-const connection = {
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT || '6379'),
-};
+import { RedisService } from '../redis/redis.service';
 
 @Injectable()
-export class PayoutProcessor implements OnModuleInit {
+export class PayoutProcessor implements OnModuleInit, OnModuleDestroy {
   private worker!: Worker;
 
-  constructor(private payoutService: PayoutService) {}
+  constructor(
+    private payoutService: PayoutService,
+    private redisService: RedisService,
+  ) {}
 
   onModuleInit() {
     this.worker = new Worker(
@@ -28,7 +27,7 @@ export class PayoutProcessor implements OnModuleInit {
 
         return { success: true };
       },
-      { connection },
+      { connection: this.redisService.getConnectionConfig() },
     );
 
     this.worker.on('completed', (job) => {

@@ -1,27 +1,19 @@
-import { Queue, Worker } from 'bullmq';
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-
-const connection = {
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT || '6379'),
-};
+import { Queue } from 'bullmq';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { RedisService } from '../redis/redis.service';
 
 @Injectable()
-export class PayoutQueue implements OnModuleInit, OnModuleDestroy {
+export class PayoutQueue implements OnModuleDestroy {
   private queue: Queue;
-  private worker!: Worker;
 
-  constructor() {
-    this.queue = new Queue('payouts', { connection });
-  }
-
-  async onModuleInit() {
-    // Worker будет создан в PayoutProcessor
+  constructor(private redisService: RedisService) {
+    this.queue = new Queue('payouts', {
+      connection: this.redisService.getConnectionConfig(),
+    });
   }
 
   async onModuleDestroy() {
     await this.queue.close();
-    if (this.worker) await this.worker.close();
   }
 
   async addPayoutJob(data: {
