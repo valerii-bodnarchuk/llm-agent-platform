@@ -11,6 +11,7 @@ import { HealthModule } from './health/health.module';
 import { RedisModule } from './redis/redis.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
+import { SellerModule } from './seller/seller.module';
 
 
 @Module({
@@ -31,6 +32,7 @@ import { APP_GUARD } from '@nestjs/core';
     PaymentModule,
     WebhookModule,
     PayoutModule,
+    SellerModule,
   ],
   providers: [
     {

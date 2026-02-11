@@ -23,6 +23,37 @@ export class StripeService {
     );
   }
 
+  /** Create Stripe Connect Express account */
+  async createConnectAccount(email: string, name: string) {
+    return withRetry(
+      () =>
+        this.stripe.accounts.create({
+          type: 'express',
+          email,
+          capabilities: {
+            transfers: { requested: true },
+          },
+          metadata: { sellerName: name },
+        }),
+      { maxAttempts: 3, delayMs: 1000 },
+    );
+  }
+
+  /** Generate onboarding link for seller to complete KYC */
+  async createOnboardingLink(stripeAccountId: string, returnUrl: string) {
+    return this.stripe.accountLinks.create({
+      account: stripeAccountId,
+      refresh_url: `${returnUrl}?refresh=true`,
+      return_url: `${returnUrl}?success=true`,
+      type: 'account_onboarding',
+    });
+  }
+
+  /** Fetch account status from Stripe */
+  async getConnectAccount(stripeAccountId: string) {
+    return this.stripe.accounts.retrieve(stripeAccountId);
+  }
+
   getStripe() {
     return this.stripe;
   }

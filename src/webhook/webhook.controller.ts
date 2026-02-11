@@ -1,5 +1,5 @@
 import { Controller, Post, Req, Headers, RawBodyRequest, BadRequestException } from '@nestjs/common';
-import { Throttle } from '@nestjs/throttler'; // ← добавь
+import { Throttle } from '@nestjs/throttler';
 import { WebhookService } from './webhook.service';
 import { Request } from 'express';
 import Stripe from 'stripe';
@@ -25,9 +25,19 @@ export class WebhookController {
       signature,
     );
 
-    if (event.type === 'payment_intent.succeeded') {
-      const paymentIntent = event.data.object as Stripe.PaymentIntent;
-      await this.webhookService.handlePaymentSuccess(paymentIntent);
+    switch (event.type) {
+      case 'payment_intent.succeeded':
+        const paymentIntent = event.data.object as Stripe.PaymentIntent;
+        await this.webhookService.handlePaymentSuccess(paymentIntent);
+        break;
+
+      case 'account.updated':
+        const account = event.data.object as Stripe.Account;
+        await this.webhookService.handleAccountUpdated(account);
+        break;
+
+      default:
+        console.log(`Unhandled event type: ${event.type}`);
     }
 
     return { received: true };
