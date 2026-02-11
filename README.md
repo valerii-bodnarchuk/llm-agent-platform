@@ -205,7 +205,16 @@ Building in public — tracking progress below.
 - Fixed Prisma OpenSSL compatibility for ARM64 Docker builds
 - Cleaned up .gitignore, .dockerignore, environment config
 
-### Feb 9-10, 2026
+### Feb 10, 2026
 - Centralized Redis connection into shared RedisModule (was duplicated in 4 places)
 - IdempotencyService, PayoutQueue, PayoutProcessor, HealthController now use DI-injected RedisService
 - Single connection config, single place to change Redis host/port/password
+
+### Feb 11, 2026
+- Added Payout model with state machine (PENDING → ELIGIBLE → PROCESSING → PAID/FAILED)
+- Added Seller model for Stripe Connect accounts with KYC status tracking
+- Implemented validated state transitions (invalid transitions return 400)
+- Stripe Transfer integration with automatic failure handling
+- Retry logic with max attempts limit (default 3)
+- Ledger entries execute only after successful Stripe transfer
+- Payout endpoints: create, mark eligible, process, retry, get, list by status
