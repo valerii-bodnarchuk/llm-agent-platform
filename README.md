@@ -218,3 +218,8 @@ Building in public — tracking progress below.
 - Retry logic with max attempts limit (default 3)
 - Ledger entries execute only after successful Stripe transfer
 - Payout endpoints: create, mark eligible, process, retry, get, list by status
+- Stripe Connect seller onboarding with real KYC flow
+- Seller registration creates ledger account + Stripe Express account
+- Onboarding link generation for seller KYC on Stripe
+- Webhook handler for account.updated events (auto-sync seller status)
+- Full flow tested: ONBOARDING → PENDING_VERIFICATION → ACTIVE (chargesEnabled + payoutsEnabled)
