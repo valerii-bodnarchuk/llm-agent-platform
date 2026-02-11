@@ -1,14 +1,7 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider      = "prisma-client-js"
   binaryTargets = ["native", "linux-arm64-openssl-3.0.x"]
 }
-
 
 datasource db {
   provider = "postgresql"
@@ -33,34 +26,108 @@ enum CardType {
   CREDIT
 }
 
+enum PayoutStatus {
+  PENDING
+  ELIGIBLE
+  PROCESSING
+  PAID
+  FAILED
+}
+
+enum SellerStatus {
+  ONBOARDING
+  PENDING_VERIFICATION
+  ACTIVE
+  RESTRICTED
+  DISABLED
+}
+
 model Account {
-  id Int @id @default(autoincrement())
-  name String?
-  type AccountType @default(BUYER)
-  createdAt DateTime @default(now())
-  entries Entry[]
-} 
+  id        Int         @id @default(autoincrement())
+  name      String?
+  type      AccountType @default(BUYER)
+  createdAt DateTime    @default(now())
+  entries   Entry[]
+  seller    Seller?     @relation("SellerAccount")
+}
 
 model Transaction {
-  id Int @id @default(autoincrement())
-  status TransactionStatus @default(PENDING)
+  id          Int               @id @default(autoincrement())
+  status      TransactionStatus @default(PENDING)
   description String
-  createdAt DateTime @default(now())
-  entries Entry[]
+  createdAt   DateTime          @default(now())
+  entries     Entry[]
+  payouts     Payout[]
 }
 
 model Entry {
-  id Int @id @default(autoincrement())
-  amount Decimal
-  type CardType
-
-  account Account @relation(fields: [accountId], references: [id])
-  accountId Int
-  
-  transaction Transaction @relation(fields: [transactionId], references: [id])
-  transactionId Int 
-  createdAt DateTime @default(now())
+  id            Int         @id @default(autoincrement())
+  amount        Decimal
+  type          CardType
+  account       Account     @relation(fields: [accountId], references: [id])
+  accountId     Int
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+  transactionId Int
+  createdAt     DateTime    @default(now())
 
   @@index([accountId])
   @@index([transactionId])
+}
+
+model Payout {
+  id                   Int          @id @default(autoincrement())
+  status               PayoutStatus @default(PENDING)
+  amount               Decimal
+  platformFee          Decimal
+  sellerAmount         Decimal
+
+  // Stripe
+  stripePayoutId       String?      @unique
+  stripeTransferId     String?      @unique
+
+  // State tracking
+  attempts             Int          @default(0)
+  maxAttempts          Int          @default(3)
+  failureReason        String?
+  lastAttemptAt        DateTime?
+  paidAt               DateTime?
+
+  // Relations
+  transaction          Transaction  @relation(fields: [transactionId], references: [id])
+  transactionId        Int
+  seller               Seller       @relation(fields: [sellerId], references: [id])
+  sellerId             Int
+  escrowAccountId      Int
+  platformFeeAccountId Int
+
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  @@index([status])
+  @@index([sellerId])
+  @@index([transactionId])
+}
+
+model Seller {
+  id                    Int          @id @default(autoincrement())
+  name                  String
+  email                 String       @unique
+  status                SellerStatus @default(ONBOARDING)
+
+  // Stripe Connect
+  stripeAccountId       String?      @unique
+  chargesEnabled        Boolean      @default(false)
+  payoutsEnabled        Boolean      @default(false)
+  requirementsDue       String[]     // what Stripe needs from seller
+
+  // Relations
+  account               Account      @relation("SellerAccount", fields: [accountId], references: [id])
+  accountId             Int          @unique
+  payouts               Payout[]
+
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  @@index([status])
+  @@index([stripeAccountId])
 }
