@@ -230,4 +230,6 @@ Building in public — tracking progress below.
 - Admin dashboard: payout stats, failed/blocked lists, force-retry, reversal
 - Admin seller management: restricted sellers list, force-sync with Stripe
 - Fixed platform fee account resolution (was hardcoded, now auto-resolved)
+- Clean seed data with global escrow account
+- Ledger integration tests (8 tests) + state machine unit tests (10 tests)
 - First successful real Stripe Connect payout end-to-end

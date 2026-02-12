@@ -41,6 +41,15 @@ export class PayoutService {
       throw new NotFoundException('Platform fee account not found');
     }
 
+    const escrowAccount = await this.prisma.account.findFirst({
+      where: { type: 'ESCROW' },
+      orderBy: { id: 'asc' },
+    });
+
+    if (!escrowAccount) {
+      throw new NotFoundException('Escrow account not found');
+    }
+
     return this.prisma.payout.create({
       data: {
         amount: params.amount,
@@ -48,7 +57,7 @@ export class PayoutService {
         sellerAmount,
         transactionId: params.transactionId,
         sellerId: params.sellerId,
-        escrowAccountId: seller.accountId,
+        escrowAccountId: escrowAccount.id,
         platformFeeAccountId: platformFeeAccount.id,
         status: 'PENDING',
       },
