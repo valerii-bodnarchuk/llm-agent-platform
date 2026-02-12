@@ -132,4 +132,25 @@ export class LedgerService {
 
     return accountsWithBalances;
   }
+
+  async reversePayout(params: {
+    amount: number;
+    escrowAccountId: number;
+    sellerAccountId: number;
+    platformFeeAccountId: number;
+    platformFeePercent: number;
+    reason: string;
+  }) {
+    const fee = params.amount * (params.platformFeePercent / 100);
+    const sellerAmount = params.amount - fee;
+
+    return this.createTransaction({
+      description: `REVERSAL: ${params.reason}`,
+      entries: [
+        { accountId: params.sellerAccountId, amount: sellerAmount, type: 'DEBIT' },
+        { accountId: params.platformFeeAccountId, amount: fee, type: 'DEBIT' },
+        { accountId: params.escrowAccountId, amount: params.amount, type: 'CREDIT' },
+      ],
+    });
+  }
 }

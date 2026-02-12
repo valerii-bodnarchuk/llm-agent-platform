@@ -32,6 +32,15 @@ export class PayoutService {
       throw new NotFoundException(`Seller ${params.sellerId} not found`);
     }
 
+    const platformFeeAccount = await this.prisma.account.findFirst({
+      where: { type: 'PLATFORM_FEE' },
+      orderBy: { id: 'asc' },
+    });
+
+    if (!platformFeeAccount) {
+      throw new NotFoundException('Platform fee account not found');
+    }
+
     return this.prisma.payout.create({
       data: {
         amount: params.amount,
@@ -40,7 +49,7 @@ export class PayoutService {
         transactionId: params.transactionId,
         sellerId: params.sellerId,
         escrowAccountId: seller.accountId,
-        platformFeeAccountId: 1, // TODO: resolve from config
+        platformFeeAccountId: platformFeeAccount.id,
         status: 'PENDING',
       },
     });
@@ -91,6 +100,21 @@ export class PayoutService {
     });
 
     try {
+      // Check escrow balance before sending to Stripe
+      const { balance } = await this.ledger.getAccountBalance(payout.escrowAccountId);
+      if (balance < Number(payout.amount)) {
+        await this.prisma.payout.update({
+          where: { id: payoutId },
+          data: {
+            status: 'FAILED',
+            failureReason: `Insufficient escrow balance: ${balance}, required: ${payout.amount}`,
+          },
+        });
+        throw new BadRequestException(
+          `Insufficient escrow balance: ${balance}, required: ${payout.amount}`,
+        );
+      }
+
       // Transfer from platform to connected account
       const transfer = await this.stripe.getStripe().transfers.create({
         amount: Math.round(Number(payout.sellerAmount) * 100),
@@ -184,5 +208,103 @@ export class PayoutService {
       platformFeeAccountId: params.platformFeeAccountId,
       platformFeePercent: feePercent,
     });
+  }
+
+  /** Reverse a PAID payout (Stripe refund/reversal) */
+  async reversePayout(payoutId: number) {
+    const payout = await this.getPayout(payoutId);
+
+    if (payout.status !== 'PAID') {
+      throw new BadRequestException(
+        `Can only reverse PAID payouts (current: ${payout.status})`,
+      );
+    }
+
+    const seller = await this.prisma.seller.findUnique({
+      where: { id: payout.sellerId },
+    });
+
+    if (!seller) {
+      throw new NotFoundException(`Seller ${payout.sellerId} not found`);
+    }
+
+    // Reverse Stripe transfer
+    if (payout.stripeTransferId) {
+      try {
+        await this.stripe.getStripe().transfers.createReversal(
+          payout.stripeTransferId,
+        );
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : 'Unknown error';
+        throw new BadRequestException(`Stripe reversal failed: ${reason}`);
+      }
+    }
+
+    // Reverse ledger entries
+    await this.ledger.reversePayout({
+      amount: Number(payout.amount),
+      escrowAccountId: payout.escrowAccountId,
+      sellerAccountId: seller.accountId,
+      platformFeeAccountId: payout.platformFeeAccountId,
+      platformFeePercent: Number(payout.platformFee) / Number(payout.amount) * 100,
+      reason: `Reversal of payout #${payoutId}`,
+    });
+
+    return this.prisma.payout.update({
+      where: { id: payoutId },
+      data: {
+        status: 'FAILED',
+        failureReason: 'Manually reversed',
+      },
+    });
+  }
+
+  /** Admin: get payout stats summary */
+  async getPayoutStats() {
+    const [pending, eligible, processing, paid, failed] = await Promise.all([
+      this.prisma.payout.count({ where: { status: 'PENDING' } }),
+      this.prisma.payout.count({ where: { status: 'ELIGIBLE' } }),
+      this.prisma.payout.count({ where: { status: 'PROCESSING' } }),
+      this.prisma.payout.count({ where: { status: 'PAID' } }),
+      this.prisma.payout.count({ where: { status: 'FAILED' } }),
+    ]);
+
+    const blocked = await this.prisma.payout.count({
+      where: {
+        status: 'FAILED',
+        attempts: { gte: 3 },
+      },
+    });
+
+    const totalPaid = await this.prisma.payout.aggregate({
+      where: { status: 'PAID' },
+      _sum: { sellerAmount: true, platformFee: true },
+    });
+
+    return {
+      counts: { pending, eligible, processing, paid, failed, blocked },
+      totals: {
+        paidToSellers: Number(totalPaid._sum.sellerAmount || 0),
+        platformFees: Number(totalPaid._sum.platformFee || 0),
+      },
+    };
+  }
+
+  async forceRetry(payoutId: number) {
+    const payout = await this.getPayout(payoutId);
+
+    if (payout.status !== 'FAILED') {
+      throw new BadRequestException(
+        `Can only force-retry FAILED payouts (current: ${payout.status})`,
+      );
+    }
+
+    // Reset attempts to allow retry
+    await this.prisma.payout.update({
+      where: { id: payoutId },
+      data: { attempts: 0 },
+    });
+
+    return this.processPayout(payoutId);
   }
 }

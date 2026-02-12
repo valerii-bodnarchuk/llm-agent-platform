@@ -223,3 +223,11 @@ Building in public — tracking progress below.
 - Onboarding link generation for seller KYC on Stripe
 - Webhook handler for account.updated events (auto-sync seller status)
 - Full flow tested: ONBOARDING → PENDING_VERIFICATION → ACTIVE (chargesEnabled + payoutsEnabled)
+
+### Feb 12, 2026
+- Added ledger reversal for payout rollbacks (mirror DEBIT/CREDIT entries)
+- Escrow balance validation before Stripe transfer (prevents dual write issues)
+- Admin dashboard: payout stats, failed/blocked lists, force-retry, reversal
+- Admin seller management: restricted sellers list, force-sync with Stripe
+- Fixed platform fee account resolution (was hardcoded, now auto-resolved)
+- First successful real Stripe Connect payout end-to-end

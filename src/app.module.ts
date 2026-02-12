@@ -12,7 +12,7 @@ import { RedisModule } from './redis/redis.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { SellerModule } from './seller/seller.module';
-
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -22,6 +22,7 @@ import { SellerModule } from './seller/seller.module';
         limit: 100,
       },
     ]),
+    AdminModule,
     RedisModule,
     HealthModule,
     ReconciliationModule,
