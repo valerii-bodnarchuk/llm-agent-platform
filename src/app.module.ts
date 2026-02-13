@@ -13,6 +13,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { SellerModule } from './seller/seller.module';
 import { AdminModule } from './admin/admin.module';
+import { DisputeModule } from './dispute/dispute.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { AdminModule } from './admin/admin.module';
         limit: 100,
       },
     ]),
+    DisputeModule,
     AdminModule,
     RedisModule,
     HealthModule,

@@ -233,3 +233,9 @@ Building in public — tracking progress below.
 - Clean seed data with global escrow account
 - Ledger integration tests (8 tests) + state machine unit tests (10 tests)
 - First successful real Stripe Connect payout end-to-end
+
+### Feb 13, 2026
+- Added Dispute model with state machine (OPEN → UNDER_REVIEW → WON/LOST/REFUNDED)
+- Auto-freeze pending/eligible payouts when dispute is opened
+- Three resolution paths: seller wins (unfreeze), buyer wins (reverse), full refund (escrow → buyer)
+- Dispute endpoints: open, start review, resolve (won/lost/refund), get, list by status

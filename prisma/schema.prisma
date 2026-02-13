@@ -58,6 +58,7 @@ model Transaction {
   createdAt   DateTime          @default(now())
   entries     Entry[]
   payouts     Payout[]
+  disputes    Dispute[]
 }
 
 model Entry {
@@ -102,6 +103,8 @@ model Payout {
 
   createdAt            DateTime     @default(now())
   updatedAt            DateTime     @updatedAt
+  
+  disputes    Dispute[]
 
   @@index([status])
   @@index([sellerId])
@@ -130,4 +133,47 @@ model Seller {
 
   @@index([status])
   @@index([stripeAccountId])
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  WON
+  LOST
+  REFUNDED
+}
+
+enum DisputeReason {
+  PRODUCT_NOT_RECEIVED
+  PRODUCT_UNACCEPTABLE
+  FRAUDULENT
+  DUPLICATE
+  OTHER
+}
+
+model Dispute {
+  id                   Int           @id @default(autoincrement())
+  status               DisputeStatus @default(OPEN)
+  reason               DisputeReason
+  amount               Decimal
+  description          String?
+
+  // Stripe
+  stripeDisputeId      String?       @unique
+
+  // Resolution
+  resolvedAt           DateTime?
+  resolutionNote       String?
+
+  // Relations
+  transaction          Transaction   @relation(fields: [transactionId], references: [id])
+  transactionId        Int
+  payout               Payout?       @relation(fields: [payoutId], references: [id])
+  payoutId             Int?
+
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  @@index([status])
+  @@index([transactionId])
 }
