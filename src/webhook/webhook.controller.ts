@@ -36,6 +36,11 @@ export class WebhookController {
         await this.webhookService.handleAccountUpdated(account);
         break;
 
+      case 'charge.dispute.created':
+        const dispute = event.data.object as Stripe.Dispute;
+        await this.webhookService.handleDisputeCreated(dispute);
+        break;
+
       default:
         console.log(`Unhandled event type: ${event.type}`);
     }

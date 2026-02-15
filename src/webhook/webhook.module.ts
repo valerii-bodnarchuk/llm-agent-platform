@@ -4,9 +4,10 @@ import { WebhookService } from './webhook.service';
 import { StripeModule } from '../stripe/stripe.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { SellerModule } from '../seller/seller.module';
+import { DisputeModule } from '../dispute/dispute.module';
 
 @Module({
-  imports: [StripeModule, PrismaModule, SellerModule],
+  imports: [StripeModule, PrismaModule, SellerModule, DisputeModule],
   controllers: [WebhookController],
   providers: [WebhookService],
 })

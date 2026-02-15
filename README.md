@@ -239,3 +239,8 @@ Building in public — tracking progress below.
 - Auto-freeze pending/eligible payouts when dispute is opened
 - Three resolution paths: seller wins (unfreeze), buyer wins (reverse), full refund (escrow → buyer)
 - Dispute endpoints: open, start review, resolve (won/lost/refund), get, list by status
+
+### Feb 15, 2026
+- Tested dispute flow end-to-end: open → freeze payout → review → refund → verify balances
+- Added Stripe webhook handler for charge.dispute.created (auto-opens disputes)
+- Stripe dispute reasons mapped to internal enum (PRODUCT_NOT_RECEIVED, FRAUDULENT, etc.)
