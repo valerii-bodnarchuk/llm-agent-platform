@@ -79,6 +79,20 @@ export class PayoutService {
       );
     }
 
+    if (seller.payoutsBlocked) {
+      throw new BadRequestException(
+        `Seller ${payout.sellerId} payouts are blocked (negative balance: ${seller.negativeBalance})`,
+      );
+    }
+
+    const { balance } = await this.ledger.getAccountBalance(seller.accountId);
+
+    if (balance < 0) {
+      throw new BadRequestException(
+        `Seller ${seller.id} has negative balance (${balance})`,
+      );
+    }
+
     return this.prisma.payout.update({
       where: { id: payoutId },
       data: { status: 'ELIGIBLE' },

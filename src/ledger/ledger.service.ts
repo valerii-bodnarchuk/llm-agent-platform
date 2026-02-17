@@ -34,9 +34,22 @@ export class LedgerService {
      // Check sufficient balance for DEBIT entries
     for (const entry of params.entries) {
       if (entry.type === 'DEBIT') {
+        const account = await this.prisma.account.findUnique({
+          where: { id: entry.accountId },
+        });
+
+        if (!account) {
+          throw new Error(`Account ${entry.accountId} not found`);
+        }
+
         const { balance } = await this.getAccountBalance(entry.accountId);
-        if (balance < entry.amount) {
-          throw new Error(`Insufficient funds in account ${entry.accountId}. Balance: ${balance}, Required: ${entry.amount}`);
+
+        const wouldBeBalance = balance - entry.amount;
+
+        if (wouldBeBalance < 0 && !account.allowNegative) {
+          throw new Error(
+            `Insufficient funds in account ${entry.accountId}. Balance: ${balance}, Required: ${entry.amount}`,
+          );
         }
       }
     }

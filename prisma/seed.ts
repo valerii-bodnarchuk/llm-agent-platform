@@ -5,6 +5,7 @@ const prisma = new PrismaClient();
 async function main() {
   // Clear existing data (order matters for foreign keys)
   await prisma.entry.deleteMany();
+  await prisma.dispute.deleteMany();
   await prisma.payout.deleteMany();
   await prisma.transaction.deleteMany();
   await prisma.seller.deleteMany();

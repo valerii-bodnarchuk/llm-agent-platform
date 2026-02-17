@@ -244,3 +244,15 @@ Building in public — tracking progress below.
 - Tested dispute flow end-to-end: open → freeze payout → review → refund → verify balances
 - Added Stripe webhook handler for charge.dispute.created (auto-opens disputes)
 - Stripe dispute reasons mapped to internal enum (PRODUCT_NOT_RECEIVED, FRAUDULENT, etc.)
+- Added Dispute model with state machine (OPEN → UNDER_REVIEW → WON/LOST/REFUNDED)
+- Auto-freeze pending payouts when dispute opened
+- Three resolution paths: seller wins (unfreeze), buyer wins (reverse payout), full refund (escrow → buyer)
+- Stripe webhook for charge.dispute.created (auto-opens disputes)
+- Dispute state machine tests (9 tests)
+- Tested full dispute flow end-to-end with balance verification
+
+### Feb 17, 2026
+- Negative balance handling: seller goes negative after dispute reversal when funds already withdrawn
+- Automatic seller blocking when negative balance detected (payoutsBlocked flag)
+- Payout eligibility check now validates seller is not blocked
+- allowNegative flag on accounts to control which accounts can go below zero

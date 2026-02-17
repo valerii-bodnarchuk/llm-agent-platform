@@ -19,10 +19,12 @@ export class SellerService {
     if (existing) {
       throw new BadRequestException(`Seller with email ${params.email} already exists`);
     }
-
-    // Create ledger account for seller
     const account = await this.prisma.account.create({
-      data: { name: params.name, type: 'SELLER' },
+      data: {
+        name: params.name,
+        type: 'SELLER',
+        allowNegative: true,
+      },
     });
 
     // Create Stripe Connect account

@@ -106,29 +106,34 @@ export class DisputeService {
 
   /** UNDER_REVIEW → LOST (buyer wins, reverse payout if paid) */
   async resolveLost(disputeId: number, note?: string) {
-    const dispute = await this.getDispute(disputeId);
-    validateDisputeTransition(dispute.status, 'LOST');
+      const dispute = await this.getDispute(disputeId);
+      validateDisputeTransition(dispute.status, 'LOST');
 
-    // If payout was already paid, reverse it
-    if (dispute.payoutId) {
-      const payout = await this.prisma.payout.findUnique({
-        where: { id: dispute.payoutId },
-      });
+      // Find the payout to reverse — either linked or by transaction
+      let payoutToReverse = dispute.payoutId
+        ? await this.prisma.payout.findUnique({ where: { id: dispute.payoutId } })
+        : null;
 
-      if (payout && payout.status === 'PAID') {
-        await this.payoutService.reversePayout(dispute.payoutId);
+      if (!payoutToReverse) {
+        payoutToReverse = await this.prisma.payout.findFirst({
+          where: { transactionId: dispute.transactionId, status: 'PAID' },
+        });
       }
-    }
 
-    return this.prisma.dispute.update({
-      where: { id: disputeId },
-      data: {
-        status: 'LOST',
-        resolvedAt: new Date(),
-        resolutionNote: note || 'Dispute resolved in favor of buyer',
-      },
-    });
-  }
+      if (payoutToReverse && payoutToReverse.status === 'PAID') {
+        await this.payoutService.reversePayout(payoutToReverse.id);
+        await this.updateSellerNegativeBalance(payoutToReverse.sellerId);
+      }
+
+      return this.prisma.dispute.update({
+        where: { id: disputeId },
+        data: {
+          status: 'LOST',
+          resolvedAt: new Date(),
+          resolutionNote: note || 'Dispute resolved in favor of buyer',
+        },
+      });
+    }
 
   /** UNDER_REVIEW → REFUNDED (full refund to buyer) */
   async resolveRefunded(disputeId: number, note?: string) {
@@ -136,14 +141,20 @@ export class DisputeService {
     validateDisputeTransition(dispute.status, 'REFUNDED');
 
     // Reverse payout if paid
-    if (dispute.payoutId) {
-      const payout = await this.prisma.payout.findUnique({
-        where: { id: dispute.payoutId },
-      });
+    let payoutToReverse = dispute.payoutId
+      ? await this.prisma.payout.findUnique({ where: { id: dispute.payoutId } })
+      : null;
 
-      if (payout && payout.status === 'PAID') {
-        await this.payoutService.reversePayout(dispute.payoutId);
-      }
+    if (!payoutToReverse) {
+      payoutToReverse = await this.prisma.payout.findFirst({
+        where: { transactionId: dispute.transactionId, status: 'PAID' },
+      });
+    }
+
+    if (payoutToReverse && payoutToReverse.status === 'PAID') {
+      await this.payoutService.reversePayout(payoutToReverse.id);
+
+      await this.updateSellerNegativeBalance(payoutToReverse.sellerId);
     }
 
     // Refund: escrow → buyer
@@ -200,5 +211,28 @@ export class DisputeService {
       include: { transaction: true, payout: true },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  /** Check seller balance after reversal, block if negative */
+  private async updateSellerNegativeBalance(sellerId: number) {
+    const seller = await this.prisma.seller.findUnique({
+      where: { id: sellerId },
+      include: { account: true },
+    });
+
+    if (!seller) return;
+
+    const { balance } = await this.ledger.getAccountBalance(seller.accountId);
+
+    if (balance < 0) {
+      await this.prisma.seller.update({
+        where: { id: sellerId },
+        data: {
+          negativeBalance: Math.abs(balance),
+          payoutsBlocked: true,
+        },
+      });
+      console.log(`Seller ${sellerId} blocked: negative balance ${balance}`);
+    }
   }
 }
