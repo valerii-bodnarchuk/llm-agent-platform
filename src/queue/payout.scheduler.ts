@@ -2,17 +2,20 @@ import { Injectable } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PayoutQueue } from './payout.queue';
 import { PrismaService } from '../prisma/prisma.service';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
 @Injectable()
 export class PayoutScheduler {
   constructor(
+    @InjectPinoLogger(PayoutScheduler.name)
+    private readonly logger: PinoLogger,
     private payoutQueue: PayoutQueue,
     private prisma: PrismaService,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async scheduleDailyPayouts() {
-    console.log('Running daily payout scheduler...');
+    this.logger.info('Running daily payout scheduler...');
 
     // Find all completed transactions that need payout
     const completedTransactions = await this.prisma.transaction.findMany({
@@ -39,6 +42,6 @@ export class PayoutScheduler {
       }
     }
 
-    console.log(`Added ${completedTransactions.length} payout jobs to queue`);
+    this.logger.info(`Added ${completedTransactions.length} payout jobs to queue`);
   }
 }

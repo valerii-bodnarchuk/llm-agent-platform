@@ -4,10 +4,13 @@ import { LedgerService } from '../ledger/ledger.service';
 import { PayoutService } from '../payout/payout.service';
 import { DisputeStatus, DisputeReason } from '@prisma/client';
 import { validateDisputeTransition } from './dispute-state-machine';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
 @Injectable()
 export class DisputeService {
   constructor(
+    @InjectPinoLogger(DisputeService.name)
+    private readonly logger: PinoLogger,
     private prisma: PrismaService,
     private ledger: LedgerService,
     private payoutService: PayoutService,
@@ -232,7 +235,7 @@ export class DisputeService {
           payoutsBlocked: true,
         },
       });
-      console.log(`Seller ${sellerId} blocked: negative balance ${balance}`);
+      this.logger.info(`Seller ${sellerId} blocked: negative balance ${balance}`);
     }
   }
 }

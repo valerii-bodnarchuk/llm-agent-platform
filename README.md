@@ -256,3 +256,10 @@ Building in public — tracking progress below.
 - Automatic seller blocking when negative balance detected (payoutsBlocked flag)
 - Payout eligibility check now validates seller is not blocked
 - allowNegative flag on accounts to control which accounts can go below zero
+
+### Feb 23, 2026
+- Added structured logging with Pino (nestjs-pino)
+- Request correlation IDs (UUID) for tracing across services
+- Pretty-print logs in dev, JSON in production (Grafana/Loki ready)
+- Replaced console.log with structured PinoLogger in services
+- Fixed foreign key ordering in test cleanup and seed (dispute table)

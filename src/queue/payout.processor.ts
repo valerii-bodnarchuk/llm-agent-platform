@@ -2,12 +2,15 @@ import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { Worker } from 'bullmq';
 import { PayoutService } from '../payout/payout.service';
 import { RedisService } from '../redis/redis.service';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
 @Injectable()
 export class PayoutProcessor implements OnModuleInit, OnModuleDestroy {
   private worker!: Worker;
 
   constructor(
+    @InjectPinoLogger(PayoutProcessor.name)
+    private readonly logger: PinoLogger,
     private payoutService: PayoutService,
     private redisService: RedisService,
   ) {}
@@ -16,7 +19,7 @@ export class PayoutProcessor implements OnModuleInit, OnModuleDestroy {
     this.worker = new Worker(
       'payouts',
       async (job) => {
-        console.log(`Processing payout job ${job.id}`, job.data);
+        this.logger.info(`Processing payout job ${job.id}`, job.data);
 
         await this.payoutService.releasePayout({
           amount: job.data.amount,
@@ -31,11 +34,11 @@ export class PayoutProcessor implements OnModuleInit, OnModuleDestroy {
     );
 
     this.worker.on('completed', (job) => {
-      console.log(`Payout job ${job.id} completed`);
+      this.logger.info(`Payout job ${job.id} completed`);
     });
 
     this.worker.on('failed', (job, err) => {
-      console.error(`Payout job ${job?.id} failed:`, err);
+      this.logger.error(`Payout job ${job?.id} failed:`, err);
     });
   }
 

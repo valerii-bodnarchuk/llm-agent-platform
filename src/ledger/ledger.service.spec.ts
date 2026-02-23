@@ -22,6 +22,7 @@ describe('LedgerService', () => {
 
   beforeEach(async () => {
     await prisma.entry.deleteMany();
+    await prisma.dispute.deleteMany();
     await prisma.payout.deleteMany();
     await prisma.transaction.deleteMany();
     await prisma.seller.deleteMany();
@@ -48,6 +49,7 @@ describe('LedgerService', () => {
 
   afterAll(async () => {
     await prisma.entry.deleteMany();
+    await prisma.dispute.deleteMany();
     await prisma.payout.deleteMany();
     await prisma.transaction.deleteMany();
     await prisma.seller.deleteMany();

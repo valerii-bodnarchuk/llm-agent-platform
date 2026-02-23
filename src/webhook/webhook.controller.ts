@@ -42,7 +42,7 @@ export class WebhookController {
         break;
 
       default:
-        console.log(`Unhandled event type: ${event.type}`);
+        break;
     }
 
     return { received: true };

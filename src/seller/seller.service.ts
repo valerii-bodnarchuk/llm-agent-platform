@@ -2,10 +2,13 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { StripeService } from '../stripe/stripe.service';
 import { SellerStatus } from '@prisma/client';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
 @Injectable()
 export class SellerService {
   constructor(
+    @InjectPinoLogger(SellerService.name)
+    private readonly logger: PinoLogger,
     private prisma: PrismaService,
     private stripe: StripeService,
   ) {}
@@ -80,7 +83,7 @@ export class SellerService {
     });
 
     if (!seller) {
-      console.warn(`No seller found for Stripe account ${stripeAccountId}`);
+      this.logger.warn(`No seller found for Stripe account ${stripeAccountId}`);
       return;
     }
 

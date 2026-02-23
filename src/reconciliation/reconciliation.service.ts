@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StripeService } from '../stripe/stripe.service';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
 export interface ReconciliationResult {
   transactionId: number;
@@ -11,6 +12,8 @@ export interface ReconciliationResult {
 @Injectable()
 export class ReconciliationService {
   constructor(
+    @InjectPinoLogger(ReconciliationService.name)
+    private readonly logger: PinoLogger,
     private prisma: PrismaService,
     private stripe: StripeService,
   ) {}
@@ -95,7 +98,7 @@ export class ReconciliationService {
       orderBy: { createdAt: 'desc' },
     });
 
-    console.log(`Reconciling ${transactions.length} recent pending transactions`);
+    this.logger.info(`Reconciling ${transactions.length} recent pending transactions`);
 
     const results: ReconciliationResult[] = [];
     for (const transaction of transactions) {
@@ -110,7 +113,7 @@ export class ReconciliationService {
       errors: results.filter(r => r.status === 'error').length,
     };
 
-    console.log('Reconciliation summary:', summary);
+    this.logger.info('Reconciliation summary:', summary);
     return { results, summary };
   }
 
@@ -123,7 +126,7 @@ export class ReconciliationService {
       orderBy: { createdAt: 'desc' },
     });
 
-    console.log(`Deep reconciliation: ${transactions.length} total payment transactions`);
+    this.logger.info(`Deep reconciliation: ${transactions.length} total payment transactions`);
 
     const results: ReconciliationResult[] = [];
     for (const transaction of transactions) {
@@ -139,7 +142,7 @@ export class ReconciliationService {
       skipped: results.filter(r => r.status === 'skipped').length,
     };
 
-    console.log('Deep reconciliation summary:', summary);
+    this.logger.info('Deep reconciliation summary:', summary);
     return { results, summary };
   }
 }

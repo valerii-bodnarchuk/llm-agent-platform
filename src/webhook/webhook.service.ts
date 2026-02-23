@@ -3,12 +3,15 @@ import { StripeService } from '../stripe/stripe.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SellerService } from '../seller/seller.service';
 import { DisputeService } from '../dispute/dispute.service';
+import { PinoLogger, InjectPinoLogger } from 'nestjs-pino';
 import { DisputeReason } from '@prisma/client';
 import Stripe from 'stripe';
 
 @Injectable()
 export class WebhookService {
   constructor(
+    @InjectPinoLogger(WebhookService.name)
+    private readonly logger: PinoLogger,
     private stripe: StripeService,
     private prisma: PrismaService,
     private sellerService: SellerService,
@@ -40,7 +43,7 @@ export class WebhookService {
     });
 
     if (!transaction) {
-      console.error(`Transaction not found for ${paymentIntent.id}`);
+      this.logger.error(`Transaction not found for ${paymentIntent.id}`);
       return;
     }
 
@@ -49,16 +52,16 @@ export class WebhookService {
       data: { status: 'COMPLETED' },
     });
 
-    console.log(`Transaction ${transaction.id} marked as COMPLETED`);
+    this.logger.info(`Transaction ${transaction.id} marked as COMPLETED`);
   }
 
   async handleAccountUpdated(account: Stripe.Account) {
-    console.log(`Stripe account updated: ${account.id}`);
+    this.logger.info(`Stripe account updated: ${account.id}`);
     await this.sellerService.syncStripeStatus(account.id);
   }
 
   async handleDisputeCreated(dispute: Stripe.Dispute) {
-    console.log(`Stripe dispute created: ${dispute.id}`);
+    this.logger.info(`Stripe dispute created: ${dispute.id}`);
 
     // Find transaction by payment intent ID
     const paymentIntentId = typeof dispute.payment_intent === 'string'
@@ -66,7 +69,7 @@ export class WebhookService {
       : dispute.payment_intent?.id;
 
     if (!paymentIntentId) {
-      console.error(`Dispute ${dispute.id} has no payment intent`);
+      this.logger.error(`Dispute ${dispute.id} has no payment intent`);
       return;
     }
 
@@ -77,7 +80,7 @@ export class WebhookService {
     });
 
     if (!transaction) {
-      console.error(`Transaction not found for payment intent ${paymentIntentId}`);
+      this.logger.error(`Transaction not found for payment intent ${paymentIntentId}`);
       return;
     }
 
@@ -99,6 +102,6 @@ export class WebhookService {
       stripeDisputeId: dispute.id,
     });
 
-    console.log(`Dispute created for transaction ${transaction.id}`);
+    this.logger.info(`Dispute created for transaction ${transaction.id}`);
   }
 } 

@@ -14,9 +14,36 @@ import { APP_GUARD } from '@nestjs/core';
 import { SellerModule } from './seller/seller.module';
 import { AdminModule } from './admin/admin.module';
 import { DisputeModule } from './dispute/dispute.module';
+import { randomUUID } from 'crypto';
+import { IncomingMessage } from 'http';
+import { LoggerModule } from 'nestjs-pino';
 
 @Module({
   imports: [
+    LoggerModule.forRoot({
+      pinoHttp: {
+        genReqId: (req: IncomingMessage) =>
+          (req.headers['x-request-id'] as string) || randomUUID(),
+        transport:
+          process.env.NODE_ENV !== 'production'
+            ? { target: 'pino-pretty', options: { colorize: true, singleLine: true } }
+            : undefined,
+        level: process.env.LOG_LEVEL || 'info',
+        serializers: {
+          req: (req: { id: string; method: string; url: string }) => ({
+            id: req.id,
+            method: req.method,
+            url: req.url,
+          }),
+          res: (res: { statusCode: number }) => ({
+            statusCode: res.statusCode,
+          }),
+        },
+        customProps: () => ({
+          service: 'payment-processing',
+        }),
+      },
+    }),
     ThrottlerModule.forRoot([
       {
         ttl: 60000,
@@ -26,6 +53,7 @@ import { DisputeModule } from './dispute/dispute.module';
     DisputeModule,
     AdminModule,
     RedisModule,
+    LoggerModule,
     HealthModule,
     ReconciliationModule,
     QueueModule,
