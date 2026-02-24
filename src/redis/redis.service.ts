@@ -4,28 +4,27 @@ import Redis from 'ioredis';
 @Injectable()
 export class RedisService implements OnModuleDestroy {
   private readonly client: Redis;
-  private readonly connectionConfig: { host: string; port: number };
 
   constructor() {
-    this.connectionConfig = {
-      host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT || '6379'),
-    };
+    const redisUrl = process.env.REDIS_URL;
 
-    this.client = new Redis({
-      ...this.connectionConfig,
-      maxRetriesPerRequest: null, // required by BullMQ when sharing connection
+    if (!redisUrl) {
+      throw new Error('REDIS_URL is not defined');
+    }
+
+    this.client = new Redis(redisUrl, {
+      maxRetriesPerRequest: null,
     });
   }
 
-  /** Direct Redis client for get/set/exists operations */
   getClient(): Redis {
     return this.client;
   }
 
-  /** Connection config for BullMQ Queue/Worker (they create own connections) */
-  getConnectionConfig(): { host: string; port: number } {
-    return this.connectionConfig;
+  getConnectionConfig() {
+    return {
+      url: process.env.REDIS_URL,
+    };
   }
 
   async onModuleDestroy() {
