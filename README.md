@@ -131,9 +131,13 @@ See `.env.example` for all required variables.
 - [x] Rate limiting (global + per-endpoint)
 - [x] Health checks (DB + Redis)
 - [x] Docker infrastructure + CI/CD
-- [ ] Seller payouts via Stripe Connect
+- [x] Seller payouts via Stripe Connect
+- [x] Structured logging with Pino + request correlation IDs
+- [x] Dispute resolution with payout freeze/refund
+- [x] Negative balance handling with seller blocking
+- [x] Reconciliation engine (payments, payouts, ledger balance)
+- [x] Production deployment (Railway)
 - [ ] Authentication & authorization
-- [ ] Observability (logging, metrics, tracing)
 
 ## Production Considerations
 
@@ -277,3 +281,10 @@ Building in public — tracking progress below.
 - Migrated Redis config to REDIS_URL (resolved NOAUTH in production)
 - Added debian-openssl-3.0.x to Prisma binary targets for Railway runtime
 - Added GitHub Actions CI pipeline (typecheck → test → docker build validation)
+
+### Mar 1, 2026
+- Payout reconciliation engine: Stripe transfers vs internal records, orphaned payout detection
+- Ledger reconciliation: verify total debits = credits, LEDGER IMBALANCE detection
+- Risk model documentation (dispute loss allocation, negative balance policy)
+- Redis service supports both REDIS_URL and REDIS_HOST/PORT for local/production parity
+- CV preparation and production URL added to README
