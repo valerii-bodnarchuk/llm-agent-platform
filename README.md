@@ -1,3 +1,10 @@
+## Live Demo
+
+**Production URL:** https://payment-processing-system-production.up.railway.app
+
+- Health check: `curl https://payment-processing-system-production.up.railway.app/health`
+- Swagger API docs: https://payment-processing-system-production.up.railway.app/api
+
 # Payment Processing System
 
 > Full-cycle marketplace payment platform with escrow and seller payouts
