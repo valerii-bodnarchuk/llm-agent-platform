@@ -6,15 +6,17 @@ export class RedisService implements OnModuleDestroy {
   private readonly client: Redis;
 
   constructor() {
-    const redisUrl = process.env.REDIS_URL;
-
-    if (!redisUrl) {
-      throw new Error('REDIS_URL is not defined');
+    if (process.env.REDIS_URL) {
+      this.client = new Redis(process.env.REDIS_URL, {
+        maxRetriesPerRequest: null,
+      });
+    } else {
+      this.client = new Redis({
+        host: process.env.REDIS_HOST || 'localhost',
+        port: parseInt(process.env.REDIS_PORT || '6379'),
+        maxRetriesPerRequest: null,
+      });
     }
-
-    this.client = new Redis(redisUrl, {
-      maxRetriesPerRequest: null,
-    });
   }
 
   getClient(): Redis {
@@ -22,9 +24,9 @@ export class RedisService implements OnModuleDestroy {
   }
 
   getConnectionConfig() {
-    return {
-      url: process.env.REDIS_URL,
-    };
+    return process.env.REDIS_URL
+      ? { url: process.env.REDIS_URL }
+      : { host: process.env.REDIS_HOST || 'localhost', port: parseInt(process.env.REDIS_PORT || '6379') };
   }
 
   async onModuleDestroy() {

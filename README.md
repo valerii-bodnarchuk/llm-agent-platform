@@ -263,3 +263,10 @@ Building in public — tracking progress below.
 - Pretty-print logs in dev, JSON in production (Grafana/Loki ready)
 - Replaced console.log with structured PinoLogger in services
 - Fixed foreign key ordering in test cleanup and seed (dispute table)
+
+### Feb 24, 2026
+- Deployed system to Railway production environment
+- Bound NestJS to 0.0.0.0 for container networking compatibility
+- Migrated Redis config to REDIS_URL (resolved NOAUTH in production)
+- Added debian-openssl-3.0.x to Prisma binary targets for Railway runtime
+- Added GitHub Actions CI pipeline (typecheck → test → docker build validation)

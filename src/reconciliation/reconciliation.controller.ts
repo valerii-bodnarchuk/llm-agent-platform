@@ -21,4 +21,14 @@ export class ReconciliationController {
   async reconcileOne(@Param('id') id: string) {
     return this.reconciliation.reconcileTransaction(parseInt(id));
   }
+
+  @Post('payouts')
+  async reconcilePayouts() {
+    return this.reconciliation.reconcilePayouts();
+  }
+
+  @Post('ledger')
+  async reconcileLedger() {
+    return this.reconciliation.reconcileLedger();
+  }
 }
