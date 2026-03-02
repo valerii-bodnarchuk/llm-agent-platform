@@ -288,3 +288,9 @@ Building in public — tracking progress below.
 - Risk model documentation (dispute loss allocation, negative balance policy)
 - Redis service supports both REDIS_URL and REDIS_HOST/PORT for local/production parity
 - CV preparation and production URL added to README
+
+### Mar 2, 2026
+- Python fraud engine microservice (FastAPI): 6 rule-based fraud detection rules
+- Velocity checks, amount thresholds, daily volume, failed history, new account, dispute rate
+- Risk scoring 0.0-1.0 with ALLOW/REVIEW/BLOCK decisions
+- Auto-generated Swagger docs at /docs
