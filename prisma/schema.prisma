@@ -60,6 +60,7 @@ model Transaction {
   entries     Entry[]
   payouts     Payout[]
   disputes    Dispute[]
+  stripePaymentIntentId String? @unique
 }
 
 model Entry {

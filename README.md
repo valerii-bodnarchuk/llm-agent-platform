@@ -294,3 +294,10 @@ Building in public — tracking progress below.
 - Velocity checks, amount thresholds, daily volume, failed history, new account, dispute rate
 - Risk scoring 0.0-1.0 with ALLOW/REVIEW/BLOCK decisions
 - Auto-generated Swagger docs at /docs
+
+### Mar 3, 2026
+- Fixed resolveWon bug: payout unfreeze now correctly sets status ELIGIBLE (was PENDING — payout stayed frozen)
+- Added prisma.$transaction() in resolveLost for atomic DB writes after Stripe reversal
+- Added stripePaymentIntentId field to Transaction model with @unique index + migration
+- Replaced description.contains() lookups in WebhookService with findUnique by stripePaymentIntentId (O(1) vs full table scan)
+- LedgerService.createTransaction and PaymentService now persist stripePaymentIntentId on transaction creation

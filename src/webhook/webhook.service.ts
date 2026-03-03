@@ -36,9 +36,9 @@ export class WebhookService {
   }
 
   async handlePaymentSuccess(paymentIntent: Stripe.PaymentIntent) {
-    const transaction = await this.prisma.transaction.findFirst({
+    const transaction = await this.prisma.transaction.findUnique({
       where: {
-        description: { contains: paymentIntent.id },
+        stripePaymentIntentId: paymentIntent.id,
       },
     });
 
@@ -73,9 +73,9 @@ export class WebhookService {
       return;
     }
 
-    const transaction = await this.prisma.transaction.findFirst({
+    const transaction = await this.prisma.transaction.findUnique({
       where: {
-        description: { contains: paymentIntentId },
+        stripePaymentIntentId: paymentIntentId,
       },
     });
 

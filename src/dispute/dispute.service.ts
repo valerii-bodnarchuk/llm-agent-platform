@@ -90,7 +90,7 @@ export class DisputeService {
         await this.prisma.payout.update({
           where: { id: dispute.payoutId },
           data: {
-            status: 'PENDING',
+            status: 'ELIGIBLE',
             failureReason: null,
           },
         });
@@ -109,26 +109,26 @@ export class DisputeService {
 
   /** UNDER_REVIEW → LOST (buyer wins, reverse payout if paid) */
   async resolveLost(disputeId: number, note?: string) {
-      const dispute = await this.getDispute(disputeId);
-      validateDisputeTransition(dispute.status, 'LOST');
+    const dispute = await this.getDispute(disputeId);
+    validateDisputeTransition(dispute.status, 'LOST');
 
-      // Find the payout to reverse — either linked or by transaction
-      let payoutToReverse = dispute.payoutId
-        ? await this.prisma.payout.findUnique({ where: { id: dispute.payoutId } })
-        : null;
+    let payoutToReverse = dispute.payoutId
+      ? await this.prisma.payout.findUnique({ where: { id: dispute.payoutId } })
+      : null;
 
-      if (!payoutToReverse) {
-        payoutToReverse = await this.prisma.payout.findFirst({
-          where: { transactionId: dispute.transactionId, status: 'PAID' },
-        });
-      }
+    if (!payoutToReverse) {
+      payoutToReverse = await this.prisma.payout.findFirst({
+        where: { transactionId: dispute.transactionId, status: 'PAID' },
+      });
+    }
 
+    await this.prisma.$transaction(async (tx) => {
       if (payoutToReverse && payoutToReverse.status === 'PAID') {
         await this.payoutService.reversePayout(payoutToReverse.id);
         await this.updateSellerNegativeBalance(payoutToReverse.sellerId);
       }
 
-      return this.prisma.dispute.update({
+      await tx.dispute.update({
         where: { id: disputeId },
         data: {
           status: 'LOST',
@@ -136,7 +136,10 @@ export class DisputeService {
           resolutionNote: note || 'Dispute resolved in favor of buyer',
         },
       });
-    }
+    });
+
+    return this.getDispute(disputeId);
+  }
 
   /** UNDER_REVIEW → REFUNDED (full refund to buyer) */
   async resolveRefunded(disputeId: number, note?: string) {

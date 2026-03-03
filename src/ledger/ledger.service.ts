@@ -14,6 +14,7 @@ export class LedgerService {
   async createTransaction(params: {
     description: string;
     entries: Entry[];
+    stripePaymentIntentId?: string;
   }) {
     if (params.entries.length < 2) {
       throw new Error('Minimum 2 entries required');
@@ -56,7 +57,10 @@ export class LedgerService {
 
     return this.prisma.$transaction(async (tx) => {
       const transaction = await tx.transaction.create({
-        data: { description: params.description },
+        data: { 
+          description: params.description,
+          stripePaymentIntentId: params.stripePaymentIntentId,
+        },
       });
 
       await tx.entry.createMany({

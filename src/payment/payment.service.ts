@@ -30,6 +30,7 @@ export class PaymentService {
 
     const transaction = await this.ledger.createTransaction({
       description: `Payment ${paymentIntent.id}`,
+      stripePaymentIntentId: paymentIntent.id,
       entries: [
         { accountId: params.buyerAccountId, amount: params.amount, type: 'DEBIT' },
         { accountId: params.escrowAccountId, amount: params.amount, type: 'CREDIT' },
