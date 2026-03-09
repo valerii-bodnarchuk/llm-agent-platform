@@ -42,6 +42,12 @@ enum SellerStatus {
   DISABLED
 }
 
+enum FraudDecision {
+  ALLOW
+  REVIEW
+  BLOCK
+}
+
 model Account {
   id        Int         @id @default(autoincrement())
   name      String?
@@ -102,6 +108,9 @@ model Payout {
   sellerId             Int
   escrowAccountId      Int
   platformFeeAccountId Int
+
+  fraudScore           Float?
+  fraudDecision        FraudDecision?
 
   createdAt            DateTime     @default(now())
   updatedAt            DateTime     @updatedAt

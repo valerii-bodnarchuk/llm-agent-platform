@@ -41,9 +41,9 @@ def check_failed_history(req: FraudCheckRequest) -> RuleResult:
 def check_new_account(req: FraudCheckRequest) -> RuleResult:
     """New accounts are higher risk"""
     if req.seller_account_age_days < 7:
-        return RuleResult(rule="new_account", triggered=True, score=0.3, reason=f"Account is {req.seller_account_age_days} days old")
+        return RuleResult(rule="new_account", triggered=True, score=0.15, reason=f"Account is {req.seller_account_age_days} days old")
     if req.seller_account_age_days < 30:
-        return RuleResult(rule="new_account", triggered=True, score=0.1, reason=f"Account is {req.seller_account_age_days} days old")
+        return RuleResult(rule="new_account", triggered=True, score=0.05, reason=f"Account is {req.seller_account_age_days} days old")
     return RuleResult(rule="new_account", triggered=False, score=0.0)
 
 

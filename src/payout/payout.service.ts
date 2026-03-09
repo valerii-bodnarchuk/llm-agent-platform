@@ -4,6 +4,7 @@ import { LedgerService } from '../ledger/ledger.service';
 import { StripeService } from '../stripe/stripe.service';
 import { PayoutStatus } from '@prisma/client';
 import { validateTransition } from './payout-state-machine';
+import { FraudService } from '../fraud/fraud.service';
 
 @Injectable()
 export class PayoutService {
@@ -11,6 +12,7 @@ export class PayoutService {
     private prisma: PrismaService,
     private ledger: LedgerService,
     private stripe: StripeService,
+    private fraud: FraudService,
   ) {}
 
   /** Create a payout request (PENDING) */
@@ -64,7 +66,7 @@ export class PayoutService {
     });
   }
 
-  /** PENDING → ELIGIBLE (check seller is verified) */
+  /** PENDING → ELIGIBLE (check seller is verified + fraud check) */
   async markEligible(payoutId: number) {
     const payout = await this.getPayout(payoutId);
     validateTransition(payout.status, 'ELIGIBLE');
@@ -93,9 +95,79 @@ export class PayoutService {
       );
     }
 
+    // Fraud check — gate before eligibility
+    const payoutCount24h = await this.prisma.payout.count({
+      where: {
+        sellerId: payout.sellerId,
+        createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      },
+    });
+
+    const paidPayouts24h = await this.prisma.payout.aggregate({
+      where: {
+        sellerId: payout.sellerId,
+        status: 'PAID',
+        paidAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      },
+      _sum: { sellerAmount: true },
+    });
+
+    const failedPayouts7d = await this.prisma.payout.count({
+      where: {
+        sellerId: payout.sellerId,
+        status: 'FAILED',
+        createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+      },
+    });
+
+    const disputeCount = await this.prisma.dispute.count({
+      where: {
+        transaction: { payouts: { some: { sellerId: payout.sellerId } } },
+      },
+    });
+
+    const accountAgeDays = Math.floor(
+      (Date.now() - seller.createdAt.getTime()) / (24 * 60 * 60 * 1000),
+    );
+
+    const fraudResult = await this.fraud.checkTransaction({
+      transaction_id: payout.transactionId,
+      seller_id: payout.sellerId,
+      amount: Number(payout.amount),
+      seller_payout_count_24h: payoutCount24h,
+      seller_total_amount_24h: Number(paidPayouts24h._sum.sellerAmount || 0),
+      seller_failed_payouts_7d: failedPayouts7d,
+      seller_account_age_days: accountAgeDays,
+      seller_dispute_count: disputeCount,
+    });
+
+    if (fraudResult.decision === 'BLOCK') {
+      throw new BadRequestException(
+        `Payout blocked by fraud engine (score: ${fraudResult.risk_score}, rules: ${fraudResult.rules_triggered.map(r => r.rule).join(', ')})`,
+      );
+    }
+
+    if (fraudResult.decision === 'REVIEW') {
+      // Mark eligible but flag for manual review
+      return this.prisma.payout.update({
+        where: { id: payoutId },
+        data: {
+          status: 'ELIGIBLE',
+          fraudScore: fraudResult.risk_score,
+          fraudDecision: fraudResult.decision,
+          failureReason: `Fraud review: ${fraudResult.rules_triggered.map(r => r.rule).join(', ')}`,
+        },
+      });
+    }
+
+    // ALLOW — clean pass
     return this.prisma.payout.update({
       where: { id: payoutId },
-      data: { status: 'ELIGIBLE' },
+      data: {
+        status: 'ELIGIBLE',
+        fraudScore: fraudResult.risk_score,
+        fraudDecision: fraudResult.decision,
+      },
     });
   }
 
@@ -329,5 +401,13 @@ export class PayoutService {
     });
 
     return this.processPayout(payoutId);
+  }
+
+  async getPayoutsByFraudDecision(decision: string) {
+    return this.prisma.payout.findMany({
+      where: { fraudDecision: decision as any },
+      include: { seller: true },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 }

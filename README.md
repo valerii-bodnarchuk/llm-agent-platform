@@ -301,3 +301,12 @@ Building in public — tracking progress below.
 - Added stripePaymentIntentId field to Transaction model with @unique index + migration
 - Replaced description.contains() lookups in WebhookService with findUnique by stripePaymentIntentId (O(1) vs full table scan)
 - LedgerService.createTransaction and PaymentService now persist stripePaymentIntentId on transaction creation
+
+### Mar 9, 2026
+- Fraud engine integration: NestJS payout service calls Python FastAPI fraud engine before release
+- Synchronous fraud check gate in markEligible (BLOCK/REVIEW/ALLOW)
+- Fraud score and decision stored on payout record (fraudScore, fraudDecision fields)
+- Admin review queue endpoint for REVIEW payouts
+- Fail-open pattern: if fraud engine unavailable, defaults to REVIEW (not BLOCK)
+- Tuned scoring thresholds: new account alone no longer triggers REVIEW
+- Fixed dispute resolveWon bug: payout now unfreezes to ELIGIBLE (was stuck in PENDING)
