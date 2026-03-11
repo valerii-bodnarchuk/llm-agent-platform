@@ -310,3 +310,9 @@ Building in public — tracking progress below.
 - Fail-open pattern: if fraud engine unavailable, defaults to REVIEW (not BLOCK)
 - Tuned scoring thresholds: new account alone no longer triggers REVIEW
 - Fixed dispute resolveWon bug: payout now unfreezes to ELIGIBLE (was stuck in PENDING)
+
+### Mar 11, 2026
+- Pytest test suite for fraud engine: 16 tests (unit + integration + API)
+- Unit tests for individual rules (velocity, amount threshold, new account)
+- Integration tests for scoring engine (ALLOW/REVIEW/BLOCK thresholds)
+- API tests with FastAPI TestClient (health, fraud check, validation)
