@@ -98,3 +98,16 @@ See `.env.example`. Key vars: `DATABASE_URL`, `REDIS_HOST`/`REDIS_PORT` (or `RED
 
 ### CI Pipeline (`.github/workflows/ci.yml`)
 Runs: typecheck → Jest tests (with real PostgreSQL + Redis containers) → Docker build validation. Uses `sk_test_fake` / `whsec_fake` Stripe keys.
+
+## Financial Invariants (Non-Negotiable)
+- NEVER run destructive SQL (DROP, TRUNCATE, DELETE without WHERE)
+- NEVER run migrations without explicit confirmation
+- ALL financial state transitions must be inside Prisma $transaction
+- Ledger entries are IMMUTABLE — never update, only append
+- Idempotency required on all payment/payout mutations
+- Correctness > simplicity for money-touching code
+
+## Portfolio Context
+- Target: senior fintech backend roles, DACH/UK, €100k+
+- Code quality should reflect senior-level architectural decisions
+- Every design decision should be defensible in a technical interview
