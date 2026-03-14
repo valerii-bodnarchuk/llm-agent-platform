@@ -21,12 +21,7 @@ describe('LedgerService', () => {
   });
 
   beforeEach(async () => {
-    await prisma.entry.deleteMany();
-    await prisma.dispute.deleteMany();
-    await prisma.payout.deleteMany();
-    await prisma.transaction.deleteMany();
-    await prisma.seller.deleteMany();
-    await prisma.account.deleteMany();
+    await prisma.$executeRaw`TRUNCATE "Entry", "Dispute", "Payout", "Transaction", "Seller", "Account" RESTART IDENTITY CASCADE`;
 
     const buyer = await prisma.account.create({
       data: { name: 'Test Buyer', type: 'BUYER' },
@@ -48,12 +43,7 @@ describe('LedgerService', () => {
   });
 
   afterAll(async () => {
-    await prisma.entry.deleteMany();
-    await prisma.dispute.deleteMany();
-    await prisma.payout.deleteMany();
-    await prisma.transaction.deleteMany();
-    await prisma.seller.deleteMany();
-    await prisma.account.deleteMany();
+    await prisma.$executeRaw`TRUNCATE "Entry", "Dispute", "Payout", "Transaction", "Seller", "Account" RESTART IDENTITY CASCADE`;
     await prisma.$disconnect();
   });
 

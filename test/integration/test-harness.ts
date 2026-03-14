@@ -203,13 +203,7 @@ export class TestHarness {
    * Must be called in beforeEach.
    */
   async reset(): Promise<void> {
-    // FK-safe deletion order
-    await this.prisma.entry.deleteMany();
-    await this.prisma.dispute.deleteMany();
-    await this.prisma.payout.deleteMany();
-    await this.prisma.transaction.deleteMany();
-    await this.prisma.seller.deleteMany();
-    await this.prisma.account.deleteMany();
+    await this.prisma.$executeRaw`TRUNCATE "Entry", "Dispute", "Payout", "Transaction", "Seller", "Account" RESTART IDENTITY CASCADE`;
 
     // Reset mock state
     transferCounter = 0;
@@ -256,12 +250,7 @@ export class TestHarness {
   }
 
   async teardown(): Promise<void> {
-    await this.prisma.entry.deleteMany();
-    await this.prisma.dispute.deleteMany();
-    await this.prisma.payout.deleteMany();
-    await this.prisma.transaction.deleteMany();
-    await this.prisma.seller.deleteMany();
-    await this.prisma.account.deleteMany();
+    await this.prisma.$executeRaw`TRUNCATE "Entry", "Dispute", "Payout", "Transaction", "Seller", "Account" RESTART IDENTITY CASCADE`;
     await this.prisma.$disconnect();
   }
 

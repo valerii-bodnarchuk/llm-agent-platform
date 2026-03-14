@@ -30,7 +30,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start:prod": "node dist/main.js",
     "typecheck": "tsc --noEmit",
-    "test": "jest",
+    "test": "jest --runInBand",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
     "prisma:seed": "prisma db seed",
