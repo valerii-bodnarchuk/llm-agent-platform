@@ -9,16 +9,18 @@
 
 > Full-cycle marketplace payment platform with escrow and seller payouts
 
-**Tech Stack:** NestJS, Prisma, PostgreSQL, Stripe, Redis, BullMQ, Docker
+**Tech Stack:** NestJS, Prisma, PostgreSQL, Stripe, Redis, BullMQ, Docker · Fraud Engine: Python, FastAPI
 
 ## Architecture
 
-- Double-entry ledger for financial accuracy
-- Idempotent payment processing via Redis
-- Async payout scheduling with BullMQ + retries
-- Reconciliation with Stripe (hourly + daily deep scan)
-- Rate limiting (global + per-endpoint)
-- Health checks (DB + Redis connectivity)
+- Double-entry ledger for financial accuracy (BUYER → ESCROW → SELLER, all atomic)
+- Payout state machine: PENDING → ELIGIBLE → PROCESSING → PAID/FAILED with fraud gate
+- Fraud engine: Python/FastAPI microservice, 6 rule-based checks, fail-open (REVIEW on outage)
+- Dispute resolution: freeze payouts, reverse ledger entries, handle negative seller balances
+- Idempotent payment processing via Redis (24h TTL)
+- Async payout scheduling with BullMQ + exponential backoff retries
+- Reconciliation with Stripe (hourly recent + daily deep scan, orphaned transfer detection)
+- Rate limiting (global + per-endpoint), structured Pino logging with request correlation IDs
 
 ## Quick Start
 
@@ -86,16 +88,26 @@ npm run docker:down
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Health check (DB + Redis) |
-| `POST` | `/payments` | Create payment (Stripe PaymentIntent) |
-| `POST` | `/webhooks/stripe` | Stripe webhook handler |
-| `POST` | `/payouts/release` | Release payout from escrow |
-| `POST` | `/queue/payout` | Add payout job to queue |
-| `GET` | `/ledger/accounts` | List all accounts with balances |
-| `GET` | `/ledger/balance/:id` | Get account balance |
-| `GET` | `/ledger/transactions/:id` | Get account transaction history |
-| `POST` | `/reconciliation/recent` | Reconcile recent transactions (24h) |
-| `POST` | `/reconciliation/all` | Deep reconciliation (all transactions) |
-| `POST` | `/reconciliation/transaction/:id` | Reconcile single transaction |
+| `POST` | `/payments` | Create payment (Stripe PaymentIntent + escrow entry) |
+| `POST` | `/webhooks/stripe` | Stripe webhook handler (payment, dispute, account events) |
+| `POST` | `/payouts/create` | Create PENDING payout |
+| `POST` | `/payouts/:id/mark-eligible` | Fraud check gate → ELIGIBLE |
+| `POST` | `/payouts/:id/process` | Stripe Transfer → PAID/FAILED |
+| `POST` | `/payouts/:id/retry` | Retry failed payout |
+| `GET` | `/payouts/status/:status` | List payouts by status |
+| `POST` | `/disputes/open` | Open dispute (freezes payouts) |
+| `POST` | `/disputes/:id/review` | Mark UNDER_REVIEW |
+| `POST` | `/disputes/:id/resolve` | Resolve won/lost/refund |
+| `GET` | `/disputes/status/:status` | List disputes by status |
+| `POST` | `/sellers/register` | Register seller + Stripe Connect account |
+| `GET` | `/sellers/:id/onboarding-link` | Generate Stripe KYC URL |
+| `POST` | `/queue/payout` | Add payout job to async queue |
+| `GET` | `/queue/jobs` | Bull Board queue admin UI |
+| `GET` | `/ledger/accounts` | All accounts with balances |
+| `GET` | `/ledger/balance/:id` | Account balance |
+| `GET` | `/ledger/transactions/:id` | Account transaction history |
+| `POST` | `/reconciliation/recent` | Reconcile recent (24h) |
+| `POST` | `/reconciliation/all` | Deep reconciliation (all-time) |
 
 ## Infrastructure
 
@@ -137,15 +149,14 @@ See `.env.example` for all required variables.
 - [x] Negative balance handling with seller blocking
 - [x] Reconciliation engine (payments, payouts, ledger balance)
 - [x] Production deployment (Railway)
-- [ ] Authentication & authorization
+- [x] Fraud engine microservice (Python/FastAPI, 6 rules, ALLOW/REVIEW/BLOCK)
+- [x] Fraud gate in payout pipeline with fail-open fallback
 
 ## Production Considerations
 
 - Replace autoincrement IDs with UUIDs for security
 - Add authentication layer (JWT / API keys)
 - Use NestJS ConfigModule instead of raw `process.env`
-- Centralize Redis connection into shared module
-- Add structured logging (Pino / Winston)
 - Environment-specific seed data
 
 ## Development Log
