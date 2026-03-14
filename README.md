@@ -327,3 +327,9 @@ Building in public — tracking progress below.
 - Unit tests for individual rules (velocity, amount threshold, new account)
 - Integration tests for scoring engine (ALLOW/REVIEW/BLOCK thresholds)
 - API tests with FastAPI TestClient (health, fraud check, validation)
+
+### Mar 14, 2026
+- Added CLAUDE.md: dev commands, architecture overview, financial invariants, portfolio context
+- Fixed integration test suite (37 tests, all passing): buyer/seller accounts missing `allowNegative: true` in harness and seed — debiting a zero-balance BUYER account was rejected by the ledger balance check; buyer accounts are charge-tracking accounts funded externally via Stripe
+- Fixed incorrect test assertion: `processPayout` catches Stripe errors internally and returns a FAILED record — test was wrongly expecting a thrown exception
+- Replaced all `any` types in test files with proper types: `Stripe.PaymentIntentCreateParams`, `Stripe.TransferCreateParams`, `FraudCheckRequest`, `Stripe.PaymentIntent`

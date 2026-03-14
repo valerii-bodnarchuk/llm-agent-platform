@@ -20,14 +20,14 @@ async function main() {
     data: { name: 'Platform Fee', type: 'PLATFORM_FEE' },
   });
 
-  // Test buyer
+  // Test buyer (allowNegative: buyer account tracks external charges)
   const buyer = await prisma.account.create({
-    data: { name: 'Test Buyer', type: 'BUYER' },
+    data: { name: 'Test Buyer', type: 'BUYER', allowNegative: true },
   });
 
   // Test seller with account
   const sellerAccount = await prisma.account.create({
-    data: { name: 'Test Seller', type: 'SELLER' },
+    data: { name: 'Test Seller', type: 'SELLER', allowNegative: true },
   });
 
   const seller = await prisma.seller.create({
