@@ -21,4 +21,9 @@ export class LedgerController {
   async getAccountTransactions(@Param('accountId') accountId: string) {
     return this.ledger.getAccountTransactions(parseInt(accountId));
   }
+
+  @Get('integrity')
+  async verifyIntegrity() {
+    return this.ledger.verifyIntegrity();
+  }
 }

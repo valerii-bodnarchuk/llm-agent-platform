@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StripeService } from '../stripe/stripe.service';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
+import { LedgerService, LedgerIntegrityReport } from '../ledger/ledger.service';
 
 export interface ReconciliationResult {
   transactionId: number;
@@ -31,6 +32,7 @@ export class ReconciliationService {
     private readonly logger: PinoLogger,
     private prisma: PrismaService,
     private stripe: StripeService,
+    private ledger: LedgerService,
   ) {}
 
   async reconcileTransaction(transactionId: number): Promise<ReconciliationResult> {
@@ -252,55 +254,8 @@ export class ReconciliationService {
     return { results, summary };
   }
 
-  // Ledger balance reconciliation: verify debits = credits
-  async reconcileLedger() {
-    const accounts = await this.prisma.account.findMany();
-    const results: LedgerReconciliationResult[] = [];
-
-    let totalDebits = 0;
-    let totalCredits = 0;
-
-    for (const account of accounts) {
-      const entries = await this.prisma.entry.findMany({
-        where: { accountId: account.id },
-      });
-
-      const debits = entries
-        .filter(e => e.type === 'DEBIT')
-        .reduce((sum, e) => sum + Number(e.amount), 0);
-      const credits = entries
-        .filter(e => e.type === 'CREDIT')
-        .reduce((sum, e) => sum + Number(e.amount), 0);
-
-      totalDebits += debits;
-      totalCredits += credits;
-
-      results.push({
-        accountId: account.id,
-        name: account.name,
-        type: account.type,
-        debits,
-        credits,
-        balance: credits - debits,
-      });
-    }
-
-    const balanced = Math.abs(totalDebits - totalCredits) < 0.01;
-
-    const summary = {
-      totalDebits,
-      totalCredits,
-      difference: totalDebits - totalCredits,
-      balanced,
-      accountCount: accounts.length,
-    };
-
-    if (!balanced) {
-      this.logger.error({ summary }, 'LEDGER IMBALANCE DETECTED');
-    } else {
-      this.logger.info({ summary }, 'Ledger reconciliation passed');
-    }
-
-    return { accounts: results, summary };
+  // Ledger integrity: delegates to LedgerService.verifyIntegrity()
+  async reconcileLedger(): Promise<LedgerIntegrityReport> {
+    return this.ledger.verifyIntegrity();
   }
 }

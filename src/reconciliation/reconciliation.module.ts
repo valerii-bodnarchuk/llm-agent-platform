@@ -5,9 +5,10 @@ import { ReconciliationScheduler } from './reconciliation.scheduler';
 import { ReconciliationController } from './reconciliation.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { StripeModule } from '../stripe/stripe.module';
+import { LedgerModule } from '../ledger/ledger.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), PrismaModule, StripeModule],
+  imports: [ScheduleModule.forRoot(), PrismaModule, StripeModule, LedgerModule],
   controllers: [ReconciliationController],
   providers: [ReconciliationService, ReconciliationScheduler],
   exports: [ReconciliationService],

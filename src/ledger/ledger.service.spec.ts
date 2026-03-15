@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { LedgerService } from './ledger.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { getLoggerToken } from 'nestjs-pino';
 
 describe('LedgerService', () => {
   let service: LedgerService;
@@ -13,7 +14,14 @@ describe('LedgerService', () => {
 
   beforeAll(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [LedgerService, PrismaService],
+      providers: [
+        LedgerService,
+        PrismaService,
+        {
+          provide: getLoggerToken(LedgerService.name),
+          useValue: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+        },
+      ],
     }).compile();
 
     service = module.get<LedgerService>(LedgerService);
@@ -188,6 +196,88 @@ describe('LedgerService', () => {
       expect(escrowBalance).toBe(100);
       expect(sellerBalance).toBe(0);
       expect(feeBalance).toBe(0);
+    });
+  });
+
+  describe('verifyIntegrity', () => {
+    it('should report clean on empty ledger', async () => {
+      const report = await service.verifyIntegrity();
+
+      expect(report.balanced).toBe(true);
+      expect(report.globalDebits).toBe(0);
+      expect(report.globalCredits).toBe(0);
+      expect(report.globalDiff).toBe(0);
+      expect(report.unbalancedTransactions).toHaveLength(0);
+      expect(report.orphanedEntries).toHaveLength(0);
+      expect(report.checkedAt).toBeInstanceOf(Date);
+    });
+
+    it('should report balanced: true after valid transactions', async () => {
+      await prisma.transaction.create({
+        data: {
+          description: 'Payment capture',
+          status: 'COMPLETED',
+          entries: {
+            create: [
+              { accountId: buyerId, amount: 100, type: 'DEBIT' },
+              { accountId: escrowId, amount: 100, type: 'CREDIT' },
+            ],
+          },
+        },
+      });
+
+      await prisma.transaction.create({
+        data: {
+          description: 'Payout release',
+          status: 'COMPLETED',
+          entries: {
+            create: [
+              { accountId: escrowId, amount: 95, type: 'DEBIT' },
+              { accountId: platformFeeId, amount: 5, type: 'DEBIT' },
+              { accountId: sellerId, amount: 95, type: 'CREDIT' },
+              { accountId: platformFeeId, amount: 5, type: 'CREDIT' },
+            ],
+          },
+        },
+      });
+
+      const report = await service.verifyIntegrity();
+
+      expect(report.balanced).toBe(true);
+      expect(report.globalDebits).toBe(report.globalCredits);
+      expect(report.unbalancedTransactions).toHaveLength(0);
+      expect(report.orphanedEntries).toHaveLength(0);
+    });
+
+    it('should detect imbalanced ledger from raw insert bypassing service validation', async () => {
+      // Create a valid transaction first so the ledger has a baseline
+      await prisma.transaction.create({
+        data: {
+          description: 'Valid tx',
+          status: 'COMPLETED',
+          entries: {
+            create: [
+              { accountId: buyerId, amount: 100, type: 'DEBIT' },
+              { accountId: escrowId, amount: 100, type: 'CREDIT' },
+            ],
+          },
+        },
+      });
+
+      // Insert a transaction with only a DEBIT entry, bypassing service validation
+      const badTx = await prisma.transaction.create({
+        data: { description: 'Unbalanced inject', status: 'COMPLETED' },
+      });
+      await prisma.$executeRaw`
+        INSERT INTO "Entry" ("transactionId", "accountId", amount, type)
+        VALUES (${badTx.id}, ${buyerId}, 50, 'DEBIT'::"CardType")
+      `;
+
+      const report = await service.verifyIntegrity();
+
+      expect(report.balanced).toBe(false);
+      expect(report.unbalancedTransactions).toContain(badTx.id);
+      expect(report.globalDebits).toBeGreaterThan(report.globalCredits);
     });
   });
 

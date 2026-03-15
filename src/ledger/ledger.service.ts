@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
 interface Entry {
   accountId: number;
@@ -7,9 +8,23 @@ interface Entry {
   type: 'DEBIT' | 'CREDIT';
 }
 
+export interface LedgerIntegrityReport {
+  balanced: boolean;
+  globalDebits: number;
+  globalCredits: number;
+  globalDiff: number;
+  unbalancedTransactions: number[];
+  orphanedEntries: number[];
+  checkedAt: Date;
+}
+
 @Injectable()
 export class LedgerService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @InjectPinoLogger(LedgerService.name)
+    private readonly logger: PinoLogger,
+  ) {}
 
   async createTransaction(params: {
     description: string;
@@ -97,17 +112,16 @@ export class LedgerService {
   }
 
   async getAccountBalance(accountId: number) {
-    const entries = await this.prisma.entry.findMany({
-      where: { accountId },
-    });
+    const result = await this.prisma.$queryRaw<[{ balance: string }]>`
+      SELECT COALESCE(
+        SUM(CASE WHEN type = 'CREDIT' THEN amount ELSE -amount END),
+        0
+      )::text AS balance
+      FROM "Entry"
+      WHERE "accountId" = ${accountId}
+    `;
 
-    const balance = entries.reduce((sum, entry) => {
-      return entry.type === 'CREDIT' 
-        ? sum + Number(entry.amount)
-        : sum - Number(entry.amount);
-    }, 0);
-
-    return { accountId, balance };
+    return { accountId, balance: Number(result[0].balance) };
   }
 
   async getAccountTransactions(accountId: number) {
@@ -169,5 +183,61 @@ export class LedgerService {
         { accountId: params.escrowAccountId, amount: params.amount, type: 'CREDIT' },
       ],
     });
+  }
+
+  async verifyIntegrity(): Promise<LedgerIntegrityReport> {
+    // Check 1: Global debit/credit totals across all entries
+    const [globalRow] = await this.prisma.$queryRaw<
+      [{ global_debits: number; global_credits: number }]
+    >`
+      SELECT
+        COALESCE(SUM(CASE WHEN type = 'DEBIT'  THEN amount ELSE 0 END), 0)::float AS global_debits,
+        COALESCE(SUM(CASE WHEN type = 'CREDIT' THEN amount ELSE 0 END), 0)::float AS global_credits
+      FROM "Entry"
+    `;
+
+    // Check 2: Any transaction where debits ≠ credits
+    const unbalancedRows = await this.prisma.$queryRaw<
+      Array<{ transaction_id: number }>
+    >`
+      SELECT "transactionId" AS transaction_id
+      FROM "Entry"
+      GROUP BY "transactionId"
+      HAVING SUM(CASE WHEN type = 'CREDIT' THEN amount ELSE 0 END)
+          != SUM(CASE WHEN type = 'DEBIT'  THEN amount ELSE 0 END)
+    `;
+
+    // Check 3: Entries whose parent transaction no longer exists (defensive; FK should prevent this)
+    const orphanedRows = await this.prisma.$queryRaw<
+      Array<{ entry_id: number }>
+    >`
+      SELECT e.id AS entry_id
+      FROM "Entry" e
+      LEFT JOIN "Transaction" t ON e."transactionId" = t.id
+      WHERE t.id IS NULL
+    `;
+
+    const globalDebits = globalRow.global_debits;
+    const globalCredits = globalRow.global_credits;
+    const globalDiff = Math.abs(globalDebits - globalCredits);
+    const balanced = globalDiff <= 0.001 && unbalancedRows.length === 0;
+
+    const report: LedgerIntegrityReport = {
+      balanced,
+      globalDebits,
+      globalCredits,
+      globalDiff,
+      unbalancedTransactions: unbalancedRows.map((r) => Number(r.transaction_id)),
+      orphanedEntries: orphanedRows.map((r) => Number(r.entry_id)),
+      checkedAt: new Date(),
+    };
+
+    if (!balanced) {
+      this.logger.warn({ report }, 'Ledger integrity check FAILED');
+    } else {
+      this.logger.info({ checkedAt: report.checkedAt }, 'Ledger integrity check passed');
+    }
+
+    return report;
   }
 }
