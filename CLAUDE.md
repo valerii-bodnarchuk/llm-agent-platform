@@ -9,7 +9,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm run start:dev       # Dev server with hot reload
 npm run build           # Compile TypeScript to dist/
 npm run typecheck       # Type check without emit
-npm test                # Run Jest tests
+npm test                # Run Jest tests (all suites, --runInBand)
+
+# Targeted test runs
+npx jest --testPathPatterns="ledger.service.spec" --verbose   # Ledger unit tests
+npx jest --testPathPatterns="payment-lifecycle" --verbose     # Integration suite
+npx jest --verbose                                            # All tests with detail
 ```
 
 ### Infrastructure
@@ -74,6 +79,9 @@ BullMQ + Redis (`src/queue/`): `PayoutQueue` adds jobs, `PayoutProcessor` execut
 
 ### Reconciliation
 Hourly (24h window) and daily (all-time) reconciliation syncs internal payout/ledger state with Stripe. Detects orphaned Stripe transfers and ledger imbalances.
+
+### Ledger Integrity
+`LedgerService.verifyIntegrity()` runs three `$queryRaw` aggregate checks: global debit/credit totals, per-transaction balance (`GROUP BY / HAVING`), and orphaned entry scan. Returns `LedgerIntegrityReport`. Called by `ReconciliationService.reconcileLedger()` and exposed at `GET /ledger/integrity`. Logs `warn` on imbalance, `info` on clean pass.
 
 ### Dispute Loss Allocation
 1. Payout not yet released → refund from escrow, no seller loss

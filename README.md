@@ -1,95 +1,80 @@
-## Live Demo
-
-**Production URL:** https://payment-processing-system-production.up.railway.app
-
-- Health check: `curl https://payment-processing-system-production.up.railway.app/health`
-- Swagger API docs: https://payment-processing-system-production.up.railway.app/api
-
 # Payment Processing System
 
-> Full-cycle marketplace payment platform with escrow and seller payouts
+Full-cycle marketplace payment backend — escrow holding, fraud-gated seller payouts, dispute resolution, and double-entry ledger integrity checks.
 
-**Tech Stack:** NestJS, Prisma, PostgreSQL, Stripe, Redis, BullMQ, Docker · Fraud Engine: Python, FastAPI
+**Production:** https://payment-processing-system-production.up.railway.app &nbsp;·&nbsp; [Swagger](https://payment-processing-system-production.up.railway.app/api)
+
+---
 
 ## Architecture
 
-- Double-entry ledger for financial accuracy (BUYER → ESCROW → SELLER, all atomic)
-- Payout state machine: PENDING → ELIGIBLE → PROCESSING → PAID/FAILED with fraud gate
-- Fraud engine: Python/FastAPI microservice, 6 rule-based checks, fail-open (REVIEW on outage)
-- Dispute resolution: freeze payouts, reverse ledger entries, handle negative seller balances
-- Idempotent payment processing via Redis (24h TTL)
-- Async payout scheduling with BullMQ + exponential backoff retries
-- Reconciliation with Stripe (hourly recent + daily deep scan, orphaned transfer detection)
-- Rate limiting (global + per-endpoint), structured Pino logging with request correlation IDs
+```mermaid
+flowchart TD
+    Client -->|POST /payments| PaymentService
+    PaymentService -->|createPaymentIntent| Stripe
+    PaymentService -->|DEBIT buyer · CREDIT escrow| Ledger
+
+    Stripe -->|webhook: payment_intent.succeeded| WebhookService
+    WebhookService -->|mark COMPLETED| Ledger
+
+    PayoutService -->|fraud check| FraudEngine["Fraud Engine\nPython · FastAPI"]
+    FraudEngine -->|ALLOW / REVIEW / BLOCK| PayoutService
+    PayoutService -->|Stripe Transfer| Stripe
+    PayoutService -->|DEBIT escrow · CREDIT seller + fee| Ledger
+
+    DisputeService -->|freeze payout| PayoutService
+    DisputeService -->|reversal entries| Ledger
+
+    ReconciliationService -->|verify transfers| Stripe
+    ReconciliationService -->|verify debits = credits| Ledger
+
+    BullMQ["BullMQ + Redis"] -->|async jobs + daily cron| PayoutService
+```
+
+**Tech stack:** NestJS · TypeScript · PostgreSQL · Prisma · Redis · BullMQ · Python · FastAPI · Docker · GitHub Actions
+
+---
+
+## What This Handles
+
+- **Stripe transfer failure mid-payout** — payout marked FAILED, escrow funds preserved; no partial ledger writes because ledger entries are booked only after a successful transfer.
+- **Fraud engine unavailable** — fail-open to REVIEW; payouts are never blocked by an outage, just flagged for manual review.
+- **Duplicate webhook delivery** — idempotent by design; Redis-cached idempotency key (24h TTL) prevents double-booking on replayed Stripe events.
+- **Dispute after payout released** — payout reversed via mirror ledger entries; if seller already withdrew, balance goes negative and payouts are auto-blocked until resolved.
+- **Ledger drift detection** — `verifyIntegrity()` runs three SQL aggregate checks (global balance, per-transaction balance, orphaned entries) and returns a typed report; wired into the reconciliation scheduler.
+
+---
 
 ## Quick Start
-
-### Prerequisites
-
-- Node.js 20+
-- Docker & Docker Compose
-
-### Local Development
 
 ```bash
 # 1. Start infrastructure (PostgreSQL + Redis)
 npm run docker:dev
 
-# 2. Copy environment config
-cp .env.example .env
-# Edit .env with your Stripe keys
+# 2. Configure environment
+cp .env.example .env   # add your Stripe test keys
 
-# 3. Install dependencies & generate Prisma client
+# 3. Install and migrate
 npm install
-npx prisma generate
+npm run prisma:generate
+npm run prisma:migrate
+npm run prisma:seed
 
-# 4. Run migrations & seed
-npx prisma migrate deploy
-npx prisma db seed
-
-# 5. Start dev server
+# 4. Run
 npm run start:dev
 ```
 
-App runs at http://localhost:3000, Swagger at http://localhost:3000/api
+Swagger: http://localhost:3000/api
 
-### Full Stack (Docker)
-
-```bash
-# Start everything (app + postgres + redis + migrations)
-npm run docker:up
-
-# Check health
-curl localhost:3000/health
-
-# Stop
-npm run docker:down
-```
-
-### Available Scripts
-
-| Script | Description |
-|---|---|
-| `npm run start:dev` | Dev server with hot reload |
-| `npm run build` | TypeScript build |
-| `npm run start:prod` | Run production build |
-| `npm run typecheck` | Type check without emit |
-| `npm test` | Run tests |
-| `npm run docker:dev` | Start infra only (postgres + redis) |
-| `npm run docker:dev:down` | Stop infra |
-| `npm run docker:up` | Full stack in Docker |
-| `npm run docker:down` | Stop full stack |
-| `npm run prisma:generate` | Generate Prisma client |
-| `npm run prisma:migrate` | Run migrations |
-| `npm run prisma:seed` | Seed database |
+---
 
 ## API Endpoints
 
 | Method | Path | Description |
-|---|---|---|
+|--------|------|-------------|
 | `GET` | `/health` | Health check (DB + Redis) |
 | `POST` | `/payments` | Create payment (Stripe PaymentIntent + escrow entry) |
-| `POST` | `/webhooks/stripe` | Stripe webhook handler (payment, dispute, account events) |
+| `POST` | `/webhooks/stripe` | Stripe webhook handler |
 | `POST` | `/payouts/create` | Create PENDING payout |
 | `POST` | `/payouts/:id/mark-eligible` | Fraud check gate → ELIGIBLE |
 | `POST` | `/payouts/:id/process` | Stripe Transfer → PAID/FAILED |
@@ -101,237 +86,30 @@ npm run docker:down
 | `GET` | `/disputes/status/:status` | List disputes by status |
 | `POST` | `/sellers/register` | Register seller + Stripe Connect account |
 | `GET` | `/sellers/:id/onboarding-link` | Generate Stripe KYC URL |
-| `POST` | `/queue/payout` | Add payout job to async queue |
+| `POST` | `/queue/payout` | Enqueue async payout job |
 | `GET` | `/queue/jobs` | Bull Board queue admin UI |
 | `GET` | `/ledger/accounts` | All accounts with balances |
 | `GET` | `/ledger/balance/:id` | Account balance |
 | `GET` | `/ledger/transactions/:id` | Account transaction history |
-| `POST` | `/reconciliation/recent` | Reconcile recent (24h) |
+| `GET` | `/ledger/integrity` | Ledger integrity report |
+| `POST` | `/reconciliation/recent` | Reconcile recent transactions (24h) |
 | `POST` | `/reconciliation/all` | Deep reconciliation (all-time) |
+| `POST` | `/reconciliation/payouts` | Reconcile payouts against Stripe |
+| `POST` | `/reconciliation/ledger` | Verify ledger debit = credit |
 
-## Infrastructure
+---
 
-### Docker
+## Project Structure
 
-- **Multi-stage Dockerfile**: deps → build → production (~250MB image)
-- **docker-compose.yml**: Full stack with health checks and dependency ordering
-- **docker-compose.dev.yml**: Infra only for local development
-- **Non-root user** in production container
-
-### CI/CD (GitHub Actions)
-
-Pipeline runs on push/PR to `main`:
-
-1. **Lint** — `tsc --noEmit` type checking
-2. **Test** — Jest with PostgreSQL + Redis service containers
-3. **Docker** — Build image (push disabled, enable when ready to deploy)
-
-### Environment Variables
-
-See `.env.example` for all required variables.
-
-## Features
-
-- [x] Payment intake via Stripe PaymentIntents
-- [x] Escrow holding with double-entry ledger
-- [x] Seller payouts with platform fee calculation
-- [x] Async payout queue (BullMQ)
-- [x] Daily scheduled payouts (cron)
-- [x] Reconciliation jobs (hourly + daily)
-- [x] Stripe webhook handling with signature verification
-- [x] Idempotency (Redis-based)
-- [x] Rate limiting (global + per-endpoint)
-- [x] Health checks (DB + Redis)
-- [x] Docker infrastructure + CI/CD
-- [x] Seller payouts via Stripe Connect
-- [x] Structured logging with Pino + request correlation IDs
-- [x] Dispute resolution with payout freeze/refund
-- [x] Negative balance handling with seller blocking
-- [x] Reconciliation engine (payments, payouts, ledger balance)
-- [x] Production deployment (Railway)
-- [x] Fraud engine microservice (Python/FastAPI, 6 rules, ALLOW/REVIEW/BLOCK)
-- [x] Fraud gate in payout pipeline with fail-open fallback
-
-## Production Considerations
-
-- Replace autoincrement IDs with UUIDs for security
-- Add authentication layer (JWT / API keys)
-- Use NestJS ConfigModule instead of raw `process.env`
-- Environment-specific seed data
-
-## Development Log
-
-Building in public — tracking progress below.
-
-### Jan 29, 2025
-- Designed ledger schema (accounts, transactions, entries)
-- Set up Prisma with PostgreSQL
-- Implemented double-entry bookkeeping foundation
-
-### Jan 31, 2026
-- Initial project setup with NestJS, Prisma, PostgreSQL
-- Designed double-entry ledger database schema (accounts, transactions, entries)
-- Implemented LedgerService with transaction validation
-- Added unit tests for ledger balance validation
-- Set up Jest with TypeScript support
-
-### Feb 1, 2026
-- Integrated Stripe Payment Intent API
-- Implemented webhook handler for payment completion
-- Added Swagger documentation
-- Created seed data for testing
-
-### Feb 2, 2026
-- Implemented payout service with platform fee calculation (5% default)
-- Added idempotency support using Redis to prevent duplicate payments
-- Integrated BullMQ for async job processing
-- Created PayoutQueue and Worker for background payout processing
-- Added scheduled daily payouts with cron jobs
-- Built full payment cycle: buyer → escrow → seller with automated fee deduction
-
-### Feb 3, 2026
-- Added account balance check endpoint (GET /ledger/balance/:id)
-- Implemented insufficient funds validation for debits
-- Added transaction history endpoint (GET /ledger/transactions/:id)
-- Added accounts overview with real-time balances (GET /ledger/accounts)
-
-### Feb 4, 2026
-- Implemented reconciliation service to sync transaction status with Stripe
-- Added hourly reconciliation for recent pending transactions (last 24h)
-- Added daily deep reconciliation for all payment transactions (3 AM)
-- Created manual reconciliation endpoints for admin operations
-- Fixed 3 stale PENDING transactions that were actually FAILED in Stripe
-
-### Feb 5, 2026
-- Implemented API rate limiting with @nestjs/throttler
-- Configured global limit: 100 requests/minute
-- Added stricter limits for sensitive endpoints (payments: 10/min, webhooks: 50/min)
-- Rate limiting uses IP-based tracking to prevent abuse
-
-### Feb 6, 2026
-- Started Docker infrastructure setup
-- Created multi-stage Dockerfile for production builds
-- Configured docker-compose with health checks for PostgreSQL and Redis
-- Debugged DNS resolution issues with Mullvad VPN in Docker Desktop
-
-### Feb 7, 2026
-- Fixed Prisma OpenSSL compatibility for ARM64 Docker builds (node:20-slim → node:20-bookworm)
-- Resolved Prisma CLI version mismatch in Docker (npx pulling v7 instead of v5.22)
-- Added .dockerignore (reduced build context from 247MB to 3KB)
-- Configured GitHub Actions CI pipeline (typecheck → test → docker build)
-
-### Feb 8, 2026
-- Added Docker infrastructure (multi-stage Dockerfile, docker-compose)
-- Configured GitHub Actions CI pipeline (typecheck → test → docker build)
-- Added health check endpoint (GET /health) with DB + Redis monitoring
-- Fixed Prisma OpenSSL compatibility for ARM64 Docker builds
-- Cleaned up .gitignore, .dockerignore, environment config
-
-### Feb 10, 2026
-- Centralized Redis connection into shared RedisModule (was duplicated in 4 places)
-- IdempotencyService, PayoutQueue, PayoutProcessor, HealthController now use DI-injected RedisService
-- Single connection config, single place to change Redis host/port/password
-
-### Feb 11, 2026
-- Added Payout model with state machine (PENDING → ELIGIBLE → PROCESSING → PAID/FAILED)
-- Added Seller model for Stripe Connect accounts with KYC status tracking
-- Implemented validated state transitions (invalid transitions return 400)
-- Stripe Transfer integration with automatic failure handling
-- Retry logic with max attempts limit (default 3)
-- Ledger entries execute only after successful Stripe transfer
-- Payout endpoints: create, mark eligible, process, retry, get, list by status
-- Stripe Connect seller onboarding with real KYC flow
-- Seller registration creates ledger account + Stripe Express account
-- Onboarding link generation for seller KYC on Stripe
-- Webhook handler for account.updated events (auto-sync seller status)
-- Full flow tested: ONBOARDING → PENDING_VERIFICATION → ACTIVE (chargesEnabled + payoutsEnabled)
-
-### Feb 12, 2026
-- Added ledger reversal for payout rollbacks (mirror DEBIT/CREDIT entries)
-- Escrow balance validation before Stripe transfer (prevents dual write issues)
-- Admin dashboard: payout stats, failed/blocked lists, force-retry, reversal
-- Admin seller management: restricted sellers list, force-sync with Stripe
-- Fixed platform fee account resolution (was hardcoded, now auto-resolved)
-- Clean seed data with global escrow account
-- Ledger integration tests (8 tests) + state machine unit tests (10 tests)
-- First successful real Stripe Connect payout end-to-end
-
-### Feb 13, 2026
-- Added Dispute model with state machine (OPEN → UNDER_REVIEW → WON/LOST/REFUNDED)
-- Auto-freeze pending/eligible payouts when dispute is opened
-- Three resolution paths: seller wins (unfreeze), buyer wins (reverse), full refund (escrow → buyer)
-- Dispute endpoints: open, start review, resolve (won/lost/refund), get, list by status
-
-### Feb 15, 2026
-- Tested dispute flow end-to-end: open → freeze payout → review → refund → verify balances
-- Added Stripe webhook handler for charge.dispute.created (auto-opens disputes)
-- Stripe dispute reasons mapped to internal enum (PRODUCT_NOT_RECEIVED, FRAUDULENT, etc.)
-- Added Dispute model with state machine (OPEN → UNDER_REVIEW → WON/LOST/REFUNDED)
-- Auto-freeze pending payouts when dispute opened
-- Three resolution paths: seller wins (unfreeze), buyer wins (reverse payout), full refund (escrow → buyer)
-- Stripe webhook for charge.dispute.created (auto-opens disputes)
-- Dispute state machine tests (9 tests)
-- Tested full dispute flow end-to-end with balance verification
-
-### Feb 17, 2026
-- Negative balance handling: seller goes negative after dispute reversal when funds already withdrawn
-- Automatic seller blocking when negative balance detected (payoutsBlocked flag)
-- Payout eligibility check now validates seller is not blocked
-- allowNegative flag on accounts to control which accounts can go below zero
-
-### Feb 23, 2026
-- Added structured logging with Pino (nestjs-pino)
-- Request correlation IDs (UUID) for tracing across services
-- Pretty-print logs in dev, JSON in production (Grafana/Loki ready)
-- Replaced console.log with structured PinoLogger in services
-- Fixed foreign key ordering in test cleanup and seed (dispute table)
-
-### Feb 24, 2026
-- Deployed system to Railway production environment
-- Bound NestJS to 0.0.0.0 for container networking compatibility
-- Migrated Redis config to REDIS_URL (resolved NOAUTH in production)
-- Added debian-openssl-3.0.x to Prisma binary targets for Railway runtime
-- Added GitHub Actions CI pipeline (typecheck → test → docker build validation)
-
-### Mar 1, 2026
-- Payout reconciliation engine: Stripe transfers vs internal records, orphaned payout detection
-- Ledger reconciliation: verify total debits = credits, LEDGER IMBALANCE detection
-- Risk model documentation (dispute loss allocation, negative balance policy)
-- Redis service supports both REDIS_URL and REDIS_HOST/PORT for local/production parity
-- CV preparation and production URL added to README
-
-### Mar 2, 2026
-- Python fraud engine microservice (FastAPI): 6 rule-based fraud detection rules
-- Velocity checks, amount thresholds, daily volume, failed history, new account, dispute rate
-- Risk scoring 0.0-1.0 with ALLOW/REVIEW/BLOCK decisions
-- Auto-generated Swagger docs at /docs
-
-### Mar 3, 2026
-- Fixed resolveWon bug: payout unfreeze now correctly sets status ELIGIBLE (was PENDING — payout stayed frozen)
-- Added prisma.$transaction() in resolveLost for atomic DB writes after Stripe reversal
-- Added stripePaymentIntentId field to Transaction model with @unique index + migration
-- Replaced description.contains() lookups in WebhookService with findUnique by stripePaymentIntentId (O(1) vs full table scan)
-- LedgerService.createTransaction and PaymentService now persist stripePaymentIntentId on transaction creation
-
-### Mar 9, 2026
-- Fraud engine integration: NestJS payout service calls Python FastAPI fraud engine before release
-- Synchronous fraud check gate in markEligible (BLOCK/REVIEW/ALLOW)
-- Fraud score and decision stored on payout record (fraudScore, fraudDecision fields)
-- Admin review queue endpoint for REVIEW payouts
-- Fail-open pattern: if fraud engine unavailable, defaults to REVIEW (not BLOCK)
-- Tuned scoring thresholds: new account alone no longer triggers REVIEW
-- Fixed dispute resolveWon bug: payout now unfreezes to ELIGIBLE (was stuck in PENDING)
-
-### Mar 11, 2026
-- Pytest test suite for fraud engine: 16 tests (unit + integration + API)
-- Unit tests for individual rules (velocity, amount threshold, new account)
-- Integration tests for scoring engine (ALLOW/REVIEW/BLOCK thresholds)
-- API tests with FastAPI TestClient (health, fraud check, validation)
-
-### Mar 14, 2026
-- Added CLAUDE.md: dev commands, architecture overview, financial invariants, portfolio context
-- Fixed integration test suite (37 tests, all passing): buyer/seller accounts missing `allowNegative: true` in harness and seed — debiting a zero-balance BUYER account was rejected by the ledger balance check; buyer accounts are charge-tracking accounts funded externally via Stripe
-- Fixed incorrect test assertion: `processPayout` catches Stripe errors internally and returns a FAILED record — test was wrongly expecting a thrown exception
-- Replaced all `any` types in test files with proper types: `Stripe.PaymentIntentCreateParams`, `Stripe.TransferCreateParams`, `FraudCheckRequest`, `Stripe.PaymentIntent`
-- Fixed test suite parallelism: added `--runInBand` to Jest (multiple spec files sharing Postgres deadlocked when run in parallel); replaced sequential `deleteMany` chains with `TRUNCATE ... CASCADE`
-- Fixed CI typecheck: added `test/` to `tsconfig.json` exclude (integration files outside `rootDir` were failing `tsc --noEmit`)
+| Module | Path | Purpose |
+|--------|------|---------|
+| Ledger | `src/ledger/` | Double-entry bookkeeping engine |
+| Payment | `src/payment/` | Stripe PaymentIntent + escrow entry |
+| Payout | `src/payout/` | Full payout lifecycle + retry logic |
+| Fraud | `src/fraud/` | HTTP client to Python fraud engine |
+| Dispute | `src/dispute/` | Chargeback handling + ledger reversal |
+| Seller | `src/seller/` | Stripe Connect KYC + account management |
+| Webhook | `src/webhook/` | Stripe event processing |
+| Queue | `src/queue/` | BullMQ async payout processing |
+| Reconciliation | `src/reconciliation/` | Stripe/ledger sync + integrity checks |
+| Fraud Engine | `fraud-engine/` | Python/FastAPI microservice, 6 fraud rules |
