@@ -71,7 +71,7 @@ model Transaction {
 
 model Entry {
   id            Int         @id @default(autoincrement())
-  amount        Decimal
+  amount        Int
   type          CardType
   account       Account     @relation(fields: [accountId], references: [id])
   accountId     Int
@@ -86,9 +86,9 @@ model Entry {
 model Payout {
   id                   Int          @id @default(autoincrement())
   status               PayoutStatus @default(PENDING)
-  amount               Decimal
-  platformFee          Decimal
-  sellerAmount         Decimal
+  amount               Int
+  platformFee          Int
+  sellerAmount         Int
 
   // Stripe
   stripePayoutId       String?      @unique
@@ -142,7 +142,7 @@ model Seller {
   createdAt             DateTime     @default(now())
   updatedAt             DateTime     @updatedAt
 
-  negativeBalance Decimal @default(0)
+  negativeBalance Int @default(0)
   payoutsBlocked Boolean @default(false)
 
   @@index([status])
@@ -169,7 +169,7 @@ model Dispute {
   id                   Int           @id @default(autoincrement())
   status               DisputeStatus @default(OPEN)
   reason               DisputeReason
-  amount               Decimal
+  amount               Int
   description          String?
 
   // Stripe

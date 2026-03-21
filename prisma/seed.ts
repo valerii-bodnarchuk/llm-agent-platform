@@ -50,8 +50,8 @@ async function main() {
       status: 'COMPLETED',
       entries: {
         create: [
-          { accountId: buyer.id, amount: 1000, type: 'DEBIT' },
-          { accountId: escrow.id, amount: 1000, type: 'CREDIT' },
+          { accountId: buyer.id, amount: 100000, type: 'DEBIT' },
+          { accountId: escrow.id, amount: 100000, type: 'CREDIT' },
         ],
       },
     },
@@ -60,10 +60,10 @@ async function main() {
   console.log('Seed complete:');
   console.log(`  Escrow account:       #${escrow.id}`);
   console.log(`  Platform Fee account: #${platformFee.id}`);
-  console.log(`  Buyer account:        #${buyer.id} (balance: -1000, debited)`);
+  console.log(`  Buyer account:        #${buyer.id} (balance: -100000 cents = -€1000)`);
   console.log(`  Seller account:       #${sellerAccount.id}`);
   console.log(`  Seller entity:        #${seller.id} (${seller.email})`);
-  console.log(`  Escrow funded:        1000 (from tx #${fundingTx.id})`);
+  console.log(`  Escrow funded:        100000 cents = €1000 (from tx #${fundingTx.id})`);
 }
 
 main()

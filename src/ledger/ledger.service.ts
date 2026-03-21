@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
+import { assertMinorUnits, calculateFee } from '../common/money';
 
 interface Entry {
   accountId: number;
-  amount: number;
+  amount: number;  // integer cents — MUST be validated
   type: 'DEBIT' | 'CREDIT';
   narrative?: string;
 }
@@ -36,6 +37,10 @@ export class LedgerService {
       throw new Error('Minimum 2 entries required');
     }
 
+    for (const entry of params.entries) {
+      assertMinorUnits(entry.amount, `Entry amount for account ${entry.accountId}`);
+    }
+
     let sumOfDebit = 0;
     let sumOfCredit = 0;
 
@@ -48,7 +53,7 @@ export class LedgerService {
       throw new Error('Ledger is not balanced');
     }
 
-     // Check sufficient balance for DEBIT entries
+    // Check sufficient balance for DEBIT entries
     for (const entry of params.entries) {
       if (entry.type === 'DEBIT') {
         const account = await this.prisma.account.findUnique({
@@ -60,7 +65,6 @@ export class LedgerService {
         }
 
         const { balance } = await this.getAccountBalance(entry.accountId);
-
         const wouldBeBalance = balance - entry.amount;
 
         if (wouldBeBalance < 0 && !account.allowNegative) {
@@ -73,7 +77,7 @@ export class LedgerService {
 
     return this.prisma.$transaction(async (tx) => {
       const transaction = await tx.transaction.create({
-        data: { 
+        data: {
           description: params.description,
           stripePaymentIntentId: params.stripePaymentIntentId,
         },
@@ -98,6 +102,10 @@ export class LedgerService {
   }) {
     if (params.entries.length < 2) {
       throw new Error('Minimum 2 entries required');
+    }
+
+    for (const entry of params.entries) {
+      assertMinorUnits(entry.amount, `Entry amount for account ${entry.accountId}`);
     }
 
     let sumOfDebit = 0;
@@ -176,13 +184,14 @@ export class LedgerService {
   }
 
   async releasePayout(params: {
-    amount: number;
+    amount: number;  // minor units
     escrowAccountId: number;
     sellerAccountId: number;
     platformFeeAccountId: number;
     platformFeePercent: number;
   }) {
-    const fee = params.amount * (params.platformFeePercent / 100);
+    assertMinorUnits(params.amount, 'Payout amount');
+    const fee = calculateFee(params.amount, params.platformFeePercent);
     const sellerAmount = params.amount - fee;
 
     return this.createTransaction({
@@ -205,7 +214,7 @@ export class LedgerService {
       WHERE "accountId" = ${accountId}
     `;
 
-    return { accountId, balance: Number(result[0].balance) };
+    return { accountId, balance: parseInt(result[0].balance, 10) };
   }
 
   async getAccountTransactions(accountId: number) {
@@ -217,7 +226,7 @@ export class LedgerService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return entries.map(entry => ({
+    return entries.map((entry) => ({
       transactionId: entry.transaction.id,
       description: entry.transaction.description,
       amount: entry.amount,
@@ -242,21 +251,22 @@ export class LedgerService {
           balance,
           createdAt: account.createdAt,
         };
-      })
+      }),
     );
 
     return accountsWithBalances;
   }
 
   async reversePayout(params: {
-    amount: number;
+    amount: number;  // minor units
     escrowAccountId: number;
     sellerAccountId: number;
     platformFeeAccountId: number;
     platformFeePercent: number;
     reason: string;
   }) {
-    const fee = params.amount * (params.platformFeePercent / 100);
+    assertMinorUnits(params.amount, 'Reversal amount');
+    const fee = calculateFee(params.amount, params.platformFeePercent);
     const sellerAmount = params.amount - fee;
 
     return this.createTransaction({
@@ -275,8 +285,8 @@ export class LedgerService {
       [{ global_debits: number; global_credits: number }]
     >`
       SELECT
-        COALESCE(SUM(CASE WHEN type = 'DEBIT'  THEN amount ELSE 0 END), 0)::float AS global_debits,
-        COALESCE(SUM(CASE WHEN type = 'CREDIT' THEN amount ELSE 0 END), 0)::float AS global_credits
+        COALESCE(SUM(CASE WHEN type = 'DEBIT'  THEN amount ELSE 0 END), 0)::integer AS global_debits,
+        COALESCE(SUM(CASE WHEN type = 'CREDIT' THEN amount ELSE 0 END), 0)::integer AS global_credits
       FROM "Entry"
     `;
 
@@ -301,10 +311,10 @@ export class LedgerService {
       WHERE t.id IS NULL
     `;
 
-    const globalDebits = globalRow.global_debits;
-    const globalCredits = globalRow.global_credits;
+    const globalDebits = Number(globalRow.global_debits);
+    const globalCredits = Number(globalRow.global_credits);
     const globalDiff = Math.abs(globalDebits - globalCredits);
-    const balanced = globalDiff <= 0.001 && unbalancedRows.length === 0;
+    const balanced = globalDiff === 0 && unbalancedRows.length === 0;
 
     const report: LedgerIntegrityReport = {
       balanced,

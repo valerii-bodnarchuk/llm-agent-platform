@@ -57,24 +57,26 @@ describe('LedgerService', () => {
 
   describe('createTransaction', () => {
     it('should create a balanced transaction', async () => {
+      // Fund escrow: 10000 cents = €100
       await prisma.transaction.create({
         data: {
           description: 'Fund escrow',
           status: 'COMPLETED',
           entries: {
             create: [
-              { accountId: buyerId, amount: 100, type: 'DEBIT' },
-              { accountId: escrowId, amount: 100, type: 'CREDIT' },
+              { accountId: buyerId, amount: 10000, type: 'DEBIT' },
+              { accountId: escrowId, amount: 10000, type: 'CREDIT' },
             ],
           },
         },
       });
 
+      // Transfer 5000 cents = €50 from escrow to seller
       const tx = await service.createTransaction({
         description: 'Test transfer',
         entries: [
-          { accountId: escrowId, amount: 50, type: 'DEBIT' },
-          { accountId: sellerId, amount: 50, type: 'CREDIT' },
+          { accountId: escrowId, amount: 5000, type: 'DEBIT' },
+          { accountId: sellerId, amount: 5000, type: 'CREDIT' },
         ],
       });
 
@@ -84,8 +86,8 @@ describe('LedgerService', () => {
       const { balance: escrowBalance } = await service.getAccountBalance(escrowId);
       const { balance: sellerBalance } = await service.getAccountBalance(sellerId);
 
-      expect(escrowBalance).toBe(50);
-      expect(sellerBalance).toBe(50);
+      expect(escrowBalance).toBe(5000);
+      expect(sellerBalance).toBe(5000);
     });
 
     it('should reject unbalanced transactions', async () => {
@@ -93,8 +95,8 @@ describe('LedgerService', () => {
         service.createTransaction({
           description: 'Unbalanced',
           entries: [
-            { accountId: escrowId, amount: 100, type: 'DEBIT' },
-            { accountId: sellerId, amount: 50, type: 'CREDIT' },
+            { accountId: escrowId, amount: 10000, type: 'DEBIT' },
+            { accountId: sellerId, amount: 5000, type: 'CREDIT' },
           ],
         }),
       ).rejects.toThrow('Ledger is not balanced');
@@ -104,9 +106,7 @@ describe('LedgerService', () => {
       await expect(
         service.createTransaction({
           description: 'Single entry',
-          entries: [
-            { accountId: escrowId, amount: 100, type: 'DEBIT' },
-          ],
+          entries: [{ accountId: escrowId, amount: 10000, type: 'DEBIT' }],
         }),
       ).rejects.toThrow('Minimum 2 entries required');
     });
@@ -116,31 +116,45 @@ describe('LedgerService', () => {
         service.createTransaction({
           description: 'Overdraft',
           entries: [
-            { accountId: escrowId, amount: 100, type: 'DEBIT' },
-            { accountId: sellerId, amount: 100, type: 'CREDIT' },
+            { accountId: escrowId, amount: 10000, type: 'DEBIT' },
+            { accountId: sellerId, amount: 10000, type: 'CREDIT' },
           ],
         }),
       ).rejects.toThrow('Insufficient funds');
+    });
+
+    it('should reject non-integer (float) amounts', async () => {
+      await expect(
+        service.createTransaction({
+          description: 'Float amount',
+          entries: [
+            { accountId: escrowId, amount: 100.5, type: 'DEBIT' },
+            { accountId: sellerId, amount: 100.5, type: 'CREDIT' },
+          ],
+        }),
+      ).rejects.toThrow(/minor units/);
     });
   });
 
   describe('releasePayout', () => {
     it('should split amount between seller and platform fee', async () => {
+      // Fund escrow: 10000 cents = €100
       await prisma.transaction.create({
         data: {
           description: 'Fund',
           status: 'COMPLETED',
           entries: {
             create: [
-              { accountId: buyerId, amount: 100, type: 'DEBIT' },
-              { accountId: escrowId, amount: 100, type: 'CREDIT' },
+              { accountId: buyerId, amount: 10000, type: 'DEBIT' },
+              { accountId: escrowId, amount: 10000, type: 'CREDIT' },
             ],
           },
         },
       });
 
+      // Release payout: 5% fee → 500 cents fee, 9500 cents to seller
       await service.releasePayout({
-        amount: 100,
+        amount: 10000,
         escrowAccountId: escrowId,
         sellerAccountId: sellerId,
         platformFeeAccountId: platformFeeId,
@@ -152,8 +166,8 @@ describe('LedgerService', () => {
       const { balance: feeBalance } = await service.getAccountBalance(platformFeeId);
 
       expect(escrowBalance).toBe(0);
-      expect(sellerBalance).toBe(95);
-      expect(feeBalance).toBe(5);
+      expect(sellerBalance).toBe(9500);
+      expect(feeBalance).toBe(500);
     });
   });
 
@@ -165,15 +179,15 @@ describe('LedgerService', () => {
           status: 'COMPLETED',
           entries: {
             create: [
-              { accountId: buyerId, amount: 100, type: 'DEBIT' },
-              { accountId: escrowId, amount: 100, type: 'CREDIT' },
+              { accountId: buyerId, amount: 10000, type: 'DEBIT' },
+              { accountId: escrowId, amount: 10000, type: 'CREDIT' },
             ],
           },
         },
       });
 
       await service.releasePayout({
-        amount: 100,
+        amount: 10000,
         escrowAccountId: escrowId,
         sellerAccountId: sellerId,
         platformFeeAccountId: platformFeeId,
@@ -181,7 +195,7 @@ describe('LedgerService', () => {
       });
 
       await service.reversePayout({
-        amount: 100,
+        amount: 10000,
         escrowAccountId: escrowId,
         sellerAccountId: sellerId,
         platformFeeAccountId: platformFeeId,
@@ -193,7 +207,7 @@ describe('LedgerService', () => {
       const { balance: sellerBalance } = await service.getAccountBalance(sellerId);
       const { balance: feeBalance } = await service.getAccountBalance(platformFeeId);
 
-      expect(escrowBalance).toBe(100);
+      expect(escrowBalance).toBe(10000);
       expect(sellerBalance).toBe(0);
       expect(feeBalance).toBe(0);
     });
@@ -219,8 +233,8 @@ describe('LedgerService', () => {
           status: 'COMPLETED',
           entries: {
             create: [
-              { accountId: buyerId, amount: 100, type: 'DEBIT' },
-              { accountId: escrowId, amount: 100, type: 'CREDIT' },
+              { accountId: buyerId, amount: 10000, type: 'DEBIT' },
+              { accountId: escrowId, amount: 10000, type: 'CREDIT' },
             ],
           },
         },
@@ -232,10 +246,10 @@ describe('LedgerService', () => {
           status: 'COMPLETED',
           entries: {
             create: [
-              { accountId: escrowId, amount: 95, type: 'DEBIT' },
-              { accountId: platformFeeId, amount: 5, type: 'DEBIT' },
-              { accountId: sellerId, amount: 95, type: 'CREDIT' },
-              { accountId: platformFeeId, amount: 5, type: 'CREDIT' },
+              { accountId: escrowId, amount: 9500, type: 'DEBIT' },
+              { accountId: platformFeeId, amount: 500, type: 'DEBIT' },
+              { accountId: sellerId, amount: 9500, type: 'CREDIT' },
+              { accountId: platformFeeId, amount: 500, type: 'CREDIT' },
             ],
           },
         },
@@ -250,27 +264,26 @@ describe('LedgerService', () => {
     });
 
     it('should detect imbalanced ledger from raw insert bypassing service validation', async () => {
-      // Create a valid transaction first so the ledger has a baseline
       await prisma.transaction.create({
         data: {
           description: 'Valid tx',
           status: 'COMPLETED',
           entries: {
             create: [
-              { accountId: buyerId, amount: 100, type: 'DEBIT' },
-              { accountId: escrowId, amount: 100, type: 'CREDIT' },
+              { accountId: buyerId, amount: 10000, type: 'DEBIT' },
+              { accountId: escrowId, amount: 10000, type: 'CREDIT' },
             ],
           },
         },
       });
 
-      // Insert a transaction with only a DEBIT entry, bypassing service validation
+      // Bypass service: insert an unbalanced entry directly
       const badTx = await prisma.transaction.create({
         data: { description: 'Unbalanced inject', status: 'COMPLETED' },
       });
       await prisma.$executeRaw`
         INSERT INTO "Entry" ("transactionId", "accountId", amount, type)
-        VALUES (${badTx.id}, ${buyerId}, 50, 'DEBIT'::"CardType")
+        VALUES (${badTx.id}, ${buyerId}, 5000, 'DEBIT'::"CardType")
       `;
 
       const report = await service.verifyIntegrity();
@@ -294,8 +307,8 @@ describe('LedgerService', () => {
           status: 'COMPLETED',
           entries: {
             create: [
-              { accountId: buyerId, amount: 50, type: 'DEBIT' },
-              { accountId: escrowId, amount: 50, type: 'CREDIT' },
+              { accountId: buyerId, amount: 5000, type: 'DEBIT' },
+              { accountId: escrowId, amount: 5000, type: 'CREDIT' },
             ],
           },
         },
@@ -307,15 +320,15 @@ describe('LedgerService', () => {
           status: 'COMPLETED',
           entries: {
             create: [
-              { accountId: buyerId, amount: 30, type: 'DEBIT' },
-              { accountId: escrowId, amount: 30, type: 'CREDIT' },
+              { accountId: buyerId, amount: 3000, type: 'DEBIT' },
+              { accountId: escrowId, amount: 3000, type: 'CREDIT' },
             ],
           },
         },
       });
 
       const { balance } = await service.getAccountBalance(escrowId);
-      expect(balance).toBe(80);
+      expect(balance).toBe(8000);
     });
   });
 });
