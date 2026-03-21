@@ -40,6 +40,7 @@ const mockStripe = {
       amount: params.amount,
       currency: params.currency,
       status: 'requires_payment_method',
+      metadata: params.metadata || {},
     })),
   },
   transfers: {
@@ -159,7 +160,10 @@ export class TestHarness {
           provide: StripeService,
           useValue: {
             getStripe: () => mockStripe,
-            createPaymentIntent: mockStripe.paymentIntents.create,
+            createPaymentIntent: jest.fn().mockImplementation(
+              async (amount: number, currency: string = 'eur', metadata?: Record<string, string>) =>
+                mockStripe.paymentIntents.create({ amount: Math.round(amount * 100), currency, metadata }),
+            ),
           },
         },
         {
@@ -261,9 +265,9 @@ export class TestHarness {
   // ── Scenario Helpers ─────────────────────────────────────────────
 
   /**
-   * Simulate a payment: create PaymentIntent + escrow ledger entry,
-   * then mark the transaction COMPLETED (simulating webhook).
-   * Returns the transaction with its stripePaymentIntentId.
+   * Simulate a confirmed payment: create PaymentIntent (no entries), then
+   * settle via ledger.settleTransaction() — mirroring the webhook path.
+   * Returns the COMPLETED transaction record.
    */
   async createConfirmedPayment(amount: number) {
     const result = await this.payments.createPayment({
@@ -272,13 +276,28 @@ export class TestHarness {
       escrowAccountId: this.fixtures.escrowAccountId,
     });
 
-    // Simulate Stripe webhook: payment_intent.succeeded
-    await this.prisma.transaction.update({
-      where: { id: result.transaction.id },
-      data: { status: 'COMPLETED' },
+    // Settlement: webhook creates entries + marks COMPLETED
+    await this.ledger.settleTransaction({
+      transactionId: result.transaction.id,
+      entries: [
+        {
+          accountId: this.fixtures.buyerAccountId,
+          amount,
+          type: 'DEBIT' as const,
+          narrative: `Payment settled: ${result.paymentIntent.id}`,
+        },
+        {
+          accountId: this.fixtures.escrowAccountId,
+          amount,
+          type: 'CREDIT' as const,
+          narrative: `Escrow received: ${result.paymentIntent.id}`,
+        },
+      ],
     });
 
-    return result.transaction;
+    return (await this.prisma.transaction.findUnique({
+      where: { id: result.transaction.id },
+    }))!;
   }
 
   /**

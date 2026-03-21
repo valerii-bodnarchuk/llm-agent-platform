@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { StripeService } from '../stripe/stripe.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { LedgerService } from '../ledger/ledger.service';
 import { SellerService } from '../seller/seller.service';
 import { DisputeService } from '../dispute/dispute.service';
 import { PinoLogger, InjectPinoLogger } from 'nestjs-pino';
@@ -14,6 +15,7 @@ export class WebhookService {
     private readonly logger: PinoLogger,
     private stripe: StripeService,
     private prisma: PrismaService,
+    private ledger: LedgerService,
     private sellerService: SellerService,
     private disputeService: DisputeService,
   ) {}
@@ -37,22 +39,39 @@ export class WebhookService {
 
   async handlePaymentSuccess(paymentIntent: Stripe.PaymentIntent) {
     const transaction = await this.prisma.transaction.findUnique({
-      where: {
-        stripePaymentIntentId: paymentIntent.id,
-      },
+      where: { stripePaymentIntentId: paymentIntent.id },
     });
 
     if (!transaction) {
-      this.logger.error(`Transaction not found for ${paymentIntent.id}`);
+      this.logger.error({ paymentIntentId: paymentIntent.id }, 'Transaction not found');
       return;
     }
 
-    await this.prisma.transaction.update({
-      where: { id: transaction.id },
-      data: { status: 'COMPLETED' },
+    // Idempotency: duplicate webhook on already-settled transaction
+    if (transaction.status === 'COMPLETED') {
+      this.logger.info({ transactionId: transaction.id }, 'Already settled, skipping');
+      return;
+    }
+
+    const buyerAccountId = parseInt(paymentIntent.metadata?.buyerAccountId);
+    const escrowAccountId = parseInt(paymentIntent.metadata?.escrowAccountId);
+
+    if (!buyerAccountId || !escrowAccountId) {
+      this.logger.error({ paymentIntentId: paymentIntent.id }, 'Missing account metadata');
+      return;
+    }
+
+    const amount = paymentIntent.amount / 100; // Stripe cents → euros
+
+    await this.ledger.settleTransaction({
+      transactionId: transaction.id,
+      entries: [
+        { accountId: buyerAccountId, amount, type: 'DEBIT', narrative: `Payment settled: ${paymentIntent.id}` },
+        { accountId: escrowAccountId, amount, type: 'CREDIT', narrative: `Escrow received: ${paymentIntent.id}` },
+      ],
     });
 
-    this.logger.info(`Transaction ${transaction.id} marked as COMPLETED`);
+    this.logger.info({ transactionId: transaction.id, amount }, 'Payment settled');
   }
 
   async handleAccountUpdated(account: Stripe.Account) {

@@ -12,12 +12,13 @@ export class StripeService {
     });
   }
 
-  async createPaymentIntent(amount: number, currency: string = 'eur') {
+  async createPaymentIntent(amount: number, currency: string = 'eur', metadata?: Record<string, string>) {
     return withRetry(
       () =>
         this.stripe.paymentIntents.create({
           amount: Math.round(amount * 100),
           currency,
+          metadata,
         }),
       { maxAttempts: 3, delayMs: 1000 },
     );

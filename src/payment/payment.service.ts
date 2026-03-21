@@ -1,13 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { StripeService } from '../stripe/stripe.service';
-import { LedgerService } from '../ledger/ledger.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { IdempotencyService } from '../idempotency/idempotency.service';
 
 @Injectable()
 export class PaymentService {
   constructor(
     private stripe: StripeService,
-    private ledger: LedgerService,
+    private prisma: PrismaService,
     private idempotency: IdempotencyService,
   ) {}
 
@@ -26,15 +26,17 @@ export class PaymentService {
       }
     }
 
-    const paymentIntent = await this.stripe.createPaymentIntent(params.amount);
+    const paymentIntent = await this.stripe.createPaymentIntent(params.amount, 'eur', {
+      buyerAccountId: String(params.buyerAccountId),
+      escrowAccountId: String(params.escrowAccountId),
+    });
 
-    const transaction = await this.ledger.createTransaction({
-      description: `Payment ${paymentIntent.id}`,
-      stripePaymentIntentId: paymentIntent.id,
-      entries: [
-        { accountId: params.buyerAccountId, amount: params.amount, type: 'DEBIT' },
-        { accountId: params.escrowAccountId, amount: params.amount, type: 'CREDIT' },
-      ],
+    const transaction = await this.prisma.transaction.create({
+      data: {
+        description: `Payment intent ${paymentIntent.id}`,
+        stripePaymentIntentId: paymentIntent.id,
+        status: 'PENDING',
+      },
     });
 
     const result = { paymentIntent, transaction };

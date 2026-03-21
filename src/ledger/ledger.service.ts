@@ -6,6 +6,7 @@ interface Entry {
   accountId: number;
   amount: number;
   type: 'DEBIT' | 'CREDIT';
+  narrative?: string;
 }
 
 export interface LedgerIntegrityReport {
@@ -88,6 +89,89 @@ export class LedgerService {
       });
 
       return transaction;
+    });
+  }
+
+  async settleTransaction(params: {
+    transactionId: number;
+    entries: Entry[];
+  }) {
+    if (params.entries.length < 2) {
+      throw new Error('Minimum 2 entries required');
+    }
+
+    let sumOfDebit = 0;
+    let sumOfCredit = 0;
+
+    for (const entry of params.entries) {
+      if (entry.type === 'CREDIT') sumOfCredit += entry.amount;
+      if (entry.type === 'DEBIT') sumOfDebit += entry.amount;
+    }
+
+    if (sumOfDebit !== sumOfCredit) {
+      throw new Error('Ledger is not balanced');
+    }
+
+    // Check sufficient balance for DEBIT entries
+    for (const entry of params.entries) {
+      if (entry.type === 'DEBIT') {
+        const account = await this.prisma.account.findUnique({
+          where: { id: entry.accountId },
+        });
+
+        if (!account) {
+          throw new Error(`Account ${entry.accountId} not found`);
+        }
+
+        const { balance } = await this.getAccountBalance(entry.accountId);
+        const wouldBeBalance = balance - entry.amount;
+
+        if (wouldBeBalance < 0 && !account.allowNegative) {
+          throw new Error(
+            `Insufficient funds in account ${entry.accountId}. Balance: ${balance}, Required: ${entry.amount}`,
+          );
+        }
+      }
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const transaction = await tx.transaction.findUnique({
+        where: { id: params.transactionId },
+      });
+
+      if (!transaction) {
+        throw new Error(`Transaction ${params.transactionId} not found`);
+      }
+
+      if (transaction.status !== 'PENDING') {
+        throw new Error(
+          `Transaction ${params.transactionId} is ${transaction.status}, expected PENDING`,
+        );
+      }
+
+      const existingEntries = await tx.entry.count({
+        where: { transactionId: params.transactionId },
+      });
+
+      if (existingEntries > 0) {
+        throw new Error(
+          `Transaction ${params.transactionId} already has entries — double settlement prevented`,
+        );
+      }
+
+      await tx.entry.createMany({
+        data: params.entries.map((entry) => ({
+          transactionId: params.transactionId,
+          accountId: entry.accountId,
+          amount: entry.amount,
+          type: entry.type,
+        })),
+      });
+
+      return tx.transaction.update({
+        where: { id: params.transactionId },
+        data: { status: 'COMPLETED' },
+      });
     });
   }
 

@@ -34,6 +34,16 @@ export class PayoutService {
       throw new NotFoundException(`Seller ${params.sellerId} not found`);
     }
 
+    const transaction = await this.prisma.transaction.findUnique({
+      where: { id: params.transactionId },
+    });
+
+    if (!transaction || transaction.status !== 'COMPLETED') {
+      throw new BadRequestException(
+        `Cannot create payout: transaction ${params.transactionId} is ${transaction?.status ?? 'not found'}, requires COMPLETED`,
+      );
+    }
+
     const platformFeeAccount = await this.prisma.account.findFirst({
       where: { type: 'PLATFORM_FEE' },
       orderBy: { id: 'asc' },

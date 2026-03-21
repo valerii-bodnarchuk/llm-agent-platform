@@ -376,11 +376,37 @@ describe('Payment Lifecycle Integration', () => {
       // Same transaction ID — not a new one
       expect(second.transaction.id).toBe(first.transaction.id);
 
-      // Only 2 entries total (not 4)
+      // No entries — createPayment no longer books ledger entries (settlement happens on webhook)
       const entries = await h.prisma.entry.findMany();
-      expect(entries).toHaveLength(2);
+      expect(entries).toHaveLength(0);
 
-      await h.assertAccountBalance(h.fixtures.escrowAccountId, 100);
+      // Escrow is empty until webhook fires
+      await h.assertAccountBalance(h.fixtures.escrowAccountId, 0);
+      await h.assertLedgerBalanced();
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────
+  // 11. Payout on Unsettled Payment
+  // ────────────────────────────────────────────────────────────────
+
+  describe('payout on unsettled payment', () => {
+    it('should reject payout when transaction is still PENDING', async () => {
+      const result = await h.payments.createPayment({
+        amount: 100,
+        buyerAccountId: h.fixtures.buyerAccountId,
+        escrowAccountId: h.fixtures.escrowAccountId,
+      });
+
+      // No settlement — try to create payout on PENDING transaction
+      await expect(
+        h.payouts.createPayout({
+          transactionId: result.transaction.id,
+          sellerId: h.fixtures.sellerId,
+          amount: 100,
+        }),
+      ).rejects.toThrow(/COMPLETED|settled/i);
+
       await h.assertLedgerBalanced();
     });
   });
