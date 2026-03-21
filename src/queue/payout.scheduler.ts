@@ -34,7 +34,7 @@ export class PayoutScheduler {
 
       if (escrowEntry) {
         await this.payoutQueue.addPayoutJob({
-          amount: Number(escrowEntry.amount),
+          amount: escrowEntry.amount,
           escrowAccountId: 7,
           sellerAccountId: 6,
           platformFeeAccountId: 8,

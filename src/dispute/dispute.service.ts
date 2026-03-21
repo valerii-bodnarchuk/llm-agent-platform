@@ -182,8 +182,8 @@ export class DisputeService {
         await this.ledger.createTransaction({
           description: `REFUND: dispute #${disputeId}`,
           entries: [
-            { accountId: escrowAccount.id, amount: Number(dispute.amount), type: 'DEBIT' },
-            { accountId: buyerEntry.accountId, amount: Number(dispute.amount), type: 'CREDIT' },
+            { accountId: escrowAccount.id, amount: dispute.amount, type: 'DEBIT' },
+            { accountId: buyerEntry.accountId, amount: dispute.amount, type: 'CREDIT' },
           ],
         });
       }

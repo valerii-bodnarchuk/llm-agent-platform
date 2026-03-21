@@ -180,8 +180,8 @@ export class ReconciliationService {
           payout.stripeTransferId!,
         );
 
-        const stripeAmount = transfer.amount / 100; // cents → euros
-        const ourAmount = Number(payout.sellerAmount);
+        const stripeAmount = transfer.amount; // cents
+        const ourAmount = payout.sellerAmount; // cents
         const amountMatch = stripeAmount === ourAmount;
 
         const stripeReversed = transfer.reversed;

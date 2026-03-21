@@ -46,7 +46,8 @@ class OutcomeReport(BaseModel):
     transaction_id: int
     original_decision: Decision
     actual_outcome: str  # "legitimate", "fraudulent", "disputed", "chargeback"
-    reported_at: datetime = Field(default_factory=datetime.utcnow)
+    from datetime import datetime, timezone
+    reported_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class OutcomeStats(BaseModel):

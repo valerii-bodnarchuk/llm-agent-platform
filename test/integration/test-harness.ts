@@ -267,14 +267,19 @@ export class TestHarness {
   /**
    * Simulate a confirmed payment: create PaymentIntent (no entries), then
    * settle via ledger.settleTransaction() — mirroring the webhook path.
+   * @param majorAmount Amount in major units (e.g. 200 for €200). Converted
+   *   to minor units (20000 cents) for ledger settlement.
    * Returns the COMPLETED transaction record.
    */
-  async createConfirmedPayment(amount: number) {
+  async createConfirmedPayment(majorAmount: number) {
     const result = await this.payments.createPayment({
-      amount,
+      amount: majorAmount,
       buyerAccountId: this.fixtures.buyerAccountId,
       escrowAccountId: this.fixtures.escrowAccountId,
     });
+
+    // StripeService.createPaymentIntent converts major→cents, so paymentIntent.amount is cents
+    const amountMinor = result.paymentIntent.amount;
 
     // Settlement: webhook creates entries + marks COMPLETED
     await this.ledger.settleTransaction({
@@ -282,13 +287,13 @@ export class TestHarness {
       entries: [
         {
           accountId: this.fixtures.buyerAccountId,
-          amount,
+          amount: amountMinor,
           type: 'DEBIT' as const,
           narrative: `Payment settled: ${result.paymentIntent.id}`,
         },
         {
           accountId: this.fixtures.escrowAccountId,
-          amount,
+          amount: amountMinor,
           type: 'CREDIT' as const,
           narrative: `Escrow received: ${result.paymentIntent.id}`,
         },

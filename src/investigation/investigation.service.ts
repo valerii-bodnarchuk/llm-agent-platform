@@ -52,7 +52,7 @@ export class InvestigationService {
       payout: {
         id: payout.id,
         status: payout.status,
-        amount: Number(payout.amount),
+        amount: payout.amount,
         attempts: payout.attempts,
         maxAttempts: payout.maxAttempts,
         failureReason: payout.failureReason,

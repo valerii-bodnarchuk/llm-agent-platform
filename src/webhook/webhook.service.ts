@@ -61,7 +61,7 @@ export class WebhookService {
       return;
     }
 
-    const amount = paymentIntent.amount / 100; // Stripe cents → euros
+    const amount = paymentIntent.amount; // already in cents — ledger expects cents
 
     await this.ledger.settleTransaction({
       transactionId: transaction.id,
@@ -116,7 +116,7 @@ export class WebhookService {
     await this.disputeService.openDispute({
       transactionId: transaction.id,
       reason,
-      amount: dispute.amount / 100, // Stripe uses cents
+      amount: dispute.amount, // already in cents
       description: `Stripe dispute: ${dispute.reason}`,
       stripeDisputeId: dispute.id,
     });

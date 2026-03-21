@@ -84,7 +84,7 @@ describe('InvestigationService', () => {
   /** Helper: create a payout record with given overrides */
   async function createPayout(
     transactionId: number,
-    amount: number,
+    amount: number,  // minor units (cents)
     overrides: Partial<{
       status: string;
       fraudDecision: string;
@@ -93,11 +93,13 @@ describe('InvestigationService', () => {
       attempts: number;
     }> = {},
   ) {
+    const platformFee = Math.round(amount * 5 / 100);
+    const sellerAmount = amount - platformFee;
     return prisma.payout.create({
       data: {
         amount,
-        platformFee: amount * 0.05,
-        sellerAmount: amount * 0.95,
+        platformFee,
+        sellerAmount,
         status: (overrides.status as any) ?? 'PAID',
         fraudDecision: (overrides.fraudDecision as any) ?? null,
         fraudScore: overrides.fraudScore ?? null,
@@ -117,8 +119,8 @@ describe('InvestigationService', () => {
   // ─────────────────────────────────────────────────────────────────
 
   it('should report no findings for a healthy paid payout', async () => {
-    const tx = await fundEscrow(200);
-    const payout = await createPayout(tx.id, 200);
+    const tx = await fundEscrow(20000); // 20000 cents = €200
+    const payout = await createPayout(tx.id, 20000);
 
     const report = await service.investigatePayout(payout.id);
 
@@ -127,7 +129,7 @@ describe('InvestigationService', () => {
     expect(report.confidence).toBe('high');
     expect(report.probableCause).toMatch(/no issues/i);
     expect(report.recommendedActions).toHaveLength(0);
-    expect(report.context.escrowBalance).toBe(200);
+    expect(report.context.escrowBalance).toBe(20000);
     expect(report.context.ledgerBalanced).toBe(true);
   });
 
@@ -136,8 +138,8 @@ describe('InvestigationService', () => {
   // ─────────────────────────────────────────────────────────────────
 
   it('should report fraud_blocked finding for a payout blocked by fraud engine', async () => {
-    const tx = await fundEscrow(500);
-    const payout = await createPayout(tx.id, 500, {
+    const tx = await fundEscrow(50000); // 50000 cents = €500
+    const payout = await createPayout(tx.id, 50000, {
       status: 'FAILED',
       fraudDecision: 'BLOCK',
       fraudScore: 0.85,
@@ -168,14 +170,14 @@ describe('InvestigationService', () => {
         stripePaymentIntentId: `pi_empty_${Date.now()}`,
       },
     });
-    const payout = await createPayout(tx.id, 100, { status: 'FAILED' });
+    const payout = await createPayout(tx.id, 10000, { status: 'FAILED' }); // 10000 cents
 
     const report = await service.investigatePayout(payout.id);
 
     const escrowFinding = report.findings.find((f) => f.rule === 'insufficient_escrow');
     expect(escrowFinding).toBeDefined();
     expect(escrowFinding!.severity).toBe('critical');
-    expect(escrowFinding!.evidence).toMatchObject({ escrowBalance: 0, payoutAmount: 100 });
+    expect(escrowFinding!.evidence).toMatchObject({ escrowBalance: 0, payoutAmount: 10000 });
   });
 
   // ─────────────────────────────────────────────────────────────────
@@ -188,8 +190,8 @@ describe('InvestigationService', () => {
       data: { payoutsBlocked: true },
     });
 
-    const tx = await fundEscrow(150);
-    const payout = await createPayout(tx.id, 150, { status: 'FAILED' });
+    const tx = await fundEscrow(15000);
+    const payout = await createPayout(tx.id, 15000, { status: 'FAILED' });
 
     const report = await service.investigatePayout(payout.id);
 
@@ -204,8 +206,8 @@ describe('InvestigationService', () => {
   // ─────────────────────────────────────────────────────────────────
 
   it('should report multiple findings and medium confidence for fraud REVIEW + active dispute', async () => {
-    const tx = await fundEscrow(300);
-    const payout = await createPayout(tx.id, 300, {
+    const tx = await fundEscrow(30000);
+    const payout = await createPayout(tx.id, 30000, {
       status: 'ELIGIBLE',
       fraudDecision: 'REVIEW',
       fraudScore: 0.5,
@@ -216,7 +218,7 @@ describe('InvestigationService', () => {
       data: {
         transactionId: tx.id,
         reason: 'PRODUCT_NOT_RECEIVED',
-        amount: 300,
+        amount: 30000,
         status: 'OPEN',
       },
     });

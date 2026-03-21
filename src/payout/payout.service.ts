@@ -5,6 +5,7 @@ import { StripeService } from '../stripe/stripe.service';
 import { PayoutStatus } from '@prisma/client';
 import { validateTransition } from './payout-state-machine';
 import { FraudService } from '../fraud/fraud.service';
+import { assertMinorUnits, calculateFee } from '../common/money';
 
 @Injectable()
 export class PayoutService {
@@ -19,11 +20,12 @@ export class PayoutService {
   async createPayout(params: {
     transactionId: number;
     sellerId: number;
-    amount: number;
+    amount: number;  // minor units (cents)
     platformFeePercent?: number;
   }) {
+    assertMinorUnits(params.amount, 'Payout amount');
     const feePercent = params.platformFeePercent || 5;
-    const platformFee = params.amount * (feePercent / 100);
+    const platformFee = calculateFee(params.amount, feePercent);
     const sellerAmount = params.amount - platformFee;
 
     const seller = await this.prisma.seller.findUnique({
@@ -143,9 +145,9 @@ export class PayoutService {
     const fraudResult = await this.fraud.checkTransaction({
       transaction_id: payout.transactionId,
       seller_id: payout.sellerId,
-      amount: Number(payout.amount),
+      amount: payout.amount,
       seller_payout_count_24h: payoutCount24h,
-      seller_total_amount_24h: Number(paidPayouts24h._sum.sellerAmount || 0),
+      seller_total_amount_24h: paidPayouts24h._sum.sellerAmount || 0,
       seller_failed_payouts_7d: failedPayouts7d,
       seller_account_age_days: accountAgeDays,
       seller_dispute_count: disputeCount,
@@ -207,7 +209,7 @@ export class PayoutService {
     try {
       // Check escrow balance before sending to Stripe
       const { balance } = await this.ledger.getAccountBalance(payout.escrowAccountId);
-      if (balance < Number(payout.amount)) {
+      if (balance < payout.amount) {
         await this.prisma.payout.update({
           where: { id: payoutId },
           data: {
@@ -220,21 +222,25 @@ export class PayoutService {
         );
       }
 
-      // Transfer from platform to connected account
+      // Transfer from platform to connected account — Stripe expects cents
       const transfer = await this.stripe.getStripe().transfers.create({
-        amount: Math.round(Number(payout.sellerAmount) * 100),
+        amount: payout.sellerAmount,
         currency: 'eur',
         destination: seller.stripeAccountId,
         metadata: { payoutId: String(payoutId) },
       });
 
       // Ledger entries: escrow → seller + platform fee
+      // Recover feePercent via integer arithmetic to avoid float drift
+      const feePercent = payout.amount > 0
+        ? Math.round(payout.platformFee * 10000 / payout.amount) / 100
+        : 0;
       await this.ledger.releasePayout({
-        amount: Number(payout.amount),
+        amount: payout.amount,
         escrowAccountId: payout.escrowAccountId,
         sellerAccountId: seller.accountId,
         platformFeeAccountId: payout.platformFeeAccountId,
-        platformFeePercent: Number(payout.platformFee) / Number(payout.amount) * 100,
+        platformFeePercent: feePercent,
       });
 
       // PROCESSING → PAID
@@ -346,12 +352,15 @@ export class PayoutService {
     }
 
     // Reverse ledger entries
+    const feePercent = payout.amount > 0
+      ? Math.round(payout.platformFee * 10000 / payout.amount) / 100
+      : 0;
     await this.ledger.reversePayout({
-      amount: Number(payout.amount),
+      amount: payout.amount,
       escrowAccountId: payout.escrowAccountId,
       sellerAccountId: seller.accountId,
       platformFeeAccountId: payout.platformFeeAccountId,
-      platformFeePercent: Number(payout.platformFee) / Number(payout.amount) * 100,
+      platformFeePercent: feePercent,
       reason: `Reversal of payout #${payoutId}`,
     });
 
@@ -389,8 +398,8 @@ export class PayoutService {
     return {
       counts: { pending, eligible, processing, paid, failed, blocked },
       totals: {
-        paidToSellers: Number(totalPaid._sum.sellerAmount || 0),
-        platformFees: Number(totalPaid._sum.platformFee || 0),
+        paidToSellers: totalPaid._sum.sellerAmount || 0,
+        platformFees: totalPaid._sum.platformFee || 0,
       },
     };
   }
