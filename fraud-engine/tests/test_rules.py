@@ -1,5 +1,7 @@
-from app.models import FraudCheckRequest
+from app.models import FraudCheckRequest, Decision
 from app.rules.engine import evaluate, check_velocity, check_amount_threshold, check_new_account
+from app.config import CONFIG
+from app.main import build_explanation, score_to_decision
 
 
 def make_request(**overrides) -> FraudCheckRequest:
@@ -95,3 +97,62 @@ class TestEvaluate:
             seller_total_amount_24h=60000,
         ))
         assert score == 1.0
+
+
+class TestConfig:
+    def test_config_loads_expected_keys(self):
+        assert "decision_boundaries" in CONFIG
+        assert "rules" in CONFIG
+        assert "version" in CONFIG
+        for rule in ["velocity", "amount_threshold", "daily_volume",
+                     "failed_history", "new_account", "dispute_rate"]:
+            assert rule in CONFIG["rules"]
+            assert "weight" in CONFIG["rules"][rule]
+            assert "thresholds" in CONFIG["rules"][rule]
+
+    def test_decision_boundaries_values(self):
+        assert CONFIG["decision_boundaries"]["allow_below"] == 0.3
+        assert CONFIG["decision_boundaries"]["block_above"] == 0.7
+
+    def test_weight_scaling_changes_score(self):
+        # Temporarily double the velocity weight and verify score increases
+        original_weight = CONFIG["rules"]["velocity"]["weight"]
+        try:
+            CONFIG["rules"]["velocity"]["weight"] = 2.0
+            req = make_request(seller_payout_count_24h=6)  # triggers velocity at 0.2
+            score_doubled, _ = evaluate(req)
+            CONFIG["rules"]["velocity"]["weight"] = original_weight
+            score_normal, _ = evaluate(req)
+            assert score_doubled > score_normal
+        finally:
+            CONFIG["rules"]["velocity"]["weight"] = original_weight
+
+
+class TestExplanation:
+    def test_allow_explanation(self):
+        explanation = build_explanation(Decision.ALLOW, 0.1, [])
+        assert explanation == "Transaction passed all checks (score: 0.1)"
+
+    def test_review_explanation(self):
+        from app.models import RuleResult
+        triggered = [
+            RuleResult(rule="amount_threshold", triggered=True, score=0.2, reason="Amount €7000 exceeds €5000"),
+            RuleResult(rule="new_account", triggered=True, score=0.15, reason="Account is 3 days old"),
+        ]
+        explanation = build_explanation(Decision.REVIEW, 0.35, triggered)
+        assert explanation.startswith("Flagged for review:")
+        assert "amount_threshold" in explanation
+        assert "Dominant factor: amount_threshold" in explanation
+        assert "Score: 0.35" in explanation
+
+    def test_block_explanation(self):
+        from app.models import RuleResult
+        triggered = [
+            RuleResult(rule="amount_threshold", triggered=True, score=0.5, reason="Amount €15000 exceeds €10000"),
+            RuleResult(rule="velocity", triggered=True, score=0.4, reason="12 payouts in 24h"),
+            RuleResult(rule="failed_history", triggered=True, score=0.5, reason="5 failed payouts in 7d"),
+        ]
+        explanation = build_explanation(Decision.BLOCK, 1.0, triggered)
+        assert explanation.startswith("Blocked:")
+        assert "Primary risk:" in explanation
+        assert "Combined score: 1.0" in explanation

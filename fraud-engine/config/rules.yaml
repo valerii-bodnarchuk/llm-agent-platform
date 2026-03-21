@@ -1,0 +1,42 @@
+version: "1.0.0"
+
+decision_boundaries:
+  allow_below: 0.3
+  block_above: 0.7
+
+rules:
+  velocity:
+    weight: 1.0
+    thresholds:
+      - { min_count: 10, score: 0.4 }
+      - { min_count: 5,  score: 0.2 }
+
+  amount_threshold:
+    weight: 1.0
+    thresholds:
+      - { min_amount: 10000, score: 0.5 }
+      - { min_amount: 5000,  score: 0.2 }
+
+  daily_volume:
+    weight: 1.0
+    thresholds:
+      - { min_volume: 50000, score: 0.4 }
+      - { min_volume: 20000, score: 0.15 }
+
+  failed_history:
+    weight: 1.0
+    thresholds:
+      - { min_count: 5, score: 0.5 }
+      - { min_count: 2, score: 0.2 }
+
+  new_account:
+    weight: 1.0
+    thresholds:
+      - { max_days: 7,  score: 0.15 }
+      - { max_days: 30, score: 0.05 }
+
+  dispute_rate:
+    weight: 1.0
+    thresholds:
+      - { min_count: 3, score: 0.5 }
+      - { min_count: 1, score: 0.15 }

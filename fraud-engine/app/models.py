@@ -1,5 +1,6 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from enum import Enum
+from datetime import datetime
 
 
 class Decision(str, Enum):
@@ -32,3 +33,26 @@ class FraudCheckResponse(BaseModel):
     risk_score: float
     decision: Decision
     rules_triggered: list[RuleResult]
+    explanation: str
+
+
+class DetailedFraudCheckResponse(FraudCheckResponse):
+    all_rules: list[RuleResult]
+    config_version: str
+    score_breakdown: dict[str, float]
+
+
+class OutcomeReport(BaseModel):
+    transaction_id: int
+    original_decision: Decision
+    actual_outcome: str  # "legitimate", "fraudulent", "disputed", "chargeback"
+    reported_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class OutcomeStats(BaseModel):
+    total_decisions: int
+    outcomes_reported: int
+    false_positives: int
+    false_negatives: int
+    precision: float | None
+    recall: float | None
