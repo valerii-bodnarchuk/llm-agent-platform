@@ -14,6 +14,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { SellerModule } from './seller/seller.module';
 import { AdminModule } from './admin/admin.module';
 import { DisputeModule } from './dispute/dispute.module';
+import { InvestigationModule } from './investigation/investigation.module';
 import { randomUUID } from 'crypto';
 import { IncomingMessage } from 'http';
 import { LoggerModule } from 'nestjs-pino';
@@ -64,6 +65,7 @@ import { LoggerModule } from 'nestjs-pino';
     WebhookModule,
     PayoutModule,
     SellerModule,
+    InvestigationModule,
   ],
   providers: [
     {
