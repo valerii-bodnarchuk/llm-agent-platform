@@ -383,4 +383,53 @@ describe('Payment Lifecycle Integration', () => {
       await h.assertLedgerBalanced();
     });
   });
+
+  // ────────────────────────────────────────────────────────────────
+  // 12. Duplicate Payout Protection
+  // ────────────────────────────────────────────────────────────────
+
+  describe('duplicate payout protection', () => {
+    it('should reject a second payout when an active payout already exists', async () => {
+      const tx = await h.createConfirmedPayment(200); // €200 = 20000 cents
+
+      await h.payouts.createPayout({
+        transactionId: tx.id,
+        sellerId: h.fixtures.sellerId,
+        amount: 20000,
+      });
+
+      await expect(
+        h.payouts.createPayout({
+          transactionId: tx.id,
+          sellerId: h.fixtures.sellerId,
+          amount: 20000,
+        }),
+      ).rejects.toThrow(/already has an active payout/i);
+
+      await h.assertLedgerBalanced();
+    });
+
+    it('should reject payout creation when transaction already has a completed (PAID) payout', async () => {
+      const tx = await h.createConfirmedPayment(200); // €200 = 20000 cents
+
+      const payout = await h.payouts.createPayout({
+        transactionId: tx.id,
+        sellerId: h.fixtures.sellerId,
+        amount: 20000,
+      });
+
+      await h.payouts.markEligible(payout.id);
+      await h.payouts.processPayout(payout.id);
+
+      await expect(
+        h.payouts.createPayout({
+          transactionId: tx.id,
+          sellerId: h.fixtures.sellerId,
+          amount: 20000,
+        }),
+      ).rejects.toThrow(/already has a completed payout/i);
+
+      await h.assertLedgerBalanced();
+    });
+  });
 });

@@ -28,6 +28,27 @@ export class PayoutService {
     const platformFee = calculateFee(params.amount, feePercent);
     const sellerAmount = params.amount - platformFee;
 
+    // === Duplicate payout protection ===
+    const existingPayouts = await this.prisma.payout.findMany({
+      where: { transactionId: params.transactionId },
+    });
+
+    const hasPaid = existingPayouts.some((p) => p.status === 'PAID');
+    if (hasPaid) {
+      throw new BadRequestException(
+        `Transaction ${params.transactionId} already has a completed payout`,
+      );
+    }
+
+    const hasActive = existingPayouts.some((p) =>
+      ['PENDING', 'ELIGIBLE', 'PROCESSING'].includes(p.status),
+    );
+    if (hasActive) {
+      throw new BadRequestException(
+        `Transaction ${params.transactionId} already has an active payout`,
+      );
+    }
+
     const seller = await this.prisma.seller.findUnique({
       where: { id: params.sellerId },
     });
@@ -159,28 +180,33 @@ export class PayoutService {
       );
     }
 
-    if (fraudResult.decision === 'REVIEW') {
-      // Mark eligible but flag for manual review
-      return this.prisma.payout.update({
-        where: { id: payoutId },
-        data: {
-          status: 'ELIGIBLE',
-          fraudScore: fraudResult.risk_score,
-          fraudDecision: fraudResult.decision,
-          failureReason: `Fraud review: ${fraudResult.rules_triggered.map(r => r.rule).join(', ')}`,
-        },
-      });
+    const eligibleData =
+      fraudResult.decision === 'REVIEW'
+        ? {
+            status: 'ELIGIBLE' as const,
+            fraudScore: fraudResult.risk_score,
+            fraudDecision: fraudResult.decision,
+            failureReason: `Fraud review: ${fraudResult.rules_triggered.map((r) => r.rule).join(', ')}`,
+          }
+        : {
+            status: 'ELIGIBLE' as const,
+            fraudScore: fraudResult.risk_score,
+            fraudDecision: fraudResult.decision,
+          };
+
+    // Optimistic lock: only update if still PENDING (guards concurrent calls)
+    const updated = await this.prisma.payout.updateMany({
+      where: { id: payoutId, status: 'PENDING' },
+      data: eligibleData,
+    });
+
+    if (updated.count === 0) {
+      throw new BadRequestException(
+        `Payout ${payoutId} is no longer PENDING (concurrent transition)`,
+      );
     }
 
-    // ALLOW — clean pass
-    return this.prisma.payout.update({
-      where: { id: payoutId },
-      data: {
-        status: 'ELIGIBLE',
-        fraudScore: fraudResult.risk_score,
-        fraudDecision: fraudResult.decision,
-      },
-    });
+    return this.prisma.payout.findUniqueOrThrow({ where: { id: payoutId } });
   }
 
   /** ELIGIBLE → PROCESSING (send to Stripe) */
@@ -196,15 +222,21 @@ export class PayoutService {
       throw new BadRequestException(`Seller ${payout.sellerId} has no Stripe account`);
     }
 
-    // Update status + increment attempts
-    await this.prisma.payout.update({
-      where: { id: payoutId },
+    // Optimistic lock: only transition if still ELIGIBLE (guards concurrent calls)
+    const claimed = await this.prisma.payout.updateMany({
+      where: { id: payoutId, status: 'ELIGIBLE' },
       data: {
         status: 'PROCESSING',
         attempts: { increment: 1 },
         lastAttemptAt: new Date(),
       },
     });
+
+    if (claimed.count === 0) {
+      throw new BadRequestException(
+        `Payout ${payoutId} is no longer ELIGIBLE (concurrent transition)`,
+      );
+    }
 
     try {
       // Check escrow balance before sending to Stripe
