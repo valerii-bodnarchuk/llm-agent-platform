@@ -5,8 +5,9 @@ const VALID_TRANSITIONS: Record<PayoutStatus, PayoutStatus[]> = {
   PENDING: ['ELIGIBLE'],
   ELIGIBLE: ['PROCESSING'],
   PROCESSING: ['PAID', 'FAILED'],
-  PAID: [],
+  PAID: ['REVERSED'],
   FAILED: ['PROCESSING'],
+  REVERSED: [],
 };
 
 export function validateTransition(

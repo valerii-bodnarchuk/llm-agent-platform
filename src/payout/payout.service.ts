@@ -6,10 +6,13 @@ import { PayoutStatus } from '@prisma/client';
 import { validateTransition } from './payout-state-machine';
 import { FraudService } from '../fraud/fraud.service';
 import { assertMinorUnits, calculateFee } from '../common/money';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
 @Injectable()
 export class PayoutService {
   constructor(
+    @InjectPinoLogger(PayoutService.name)
+    private readonly logger: PinoLogger,
     private prisma: PrismaService,
     private ledger: LedgerService,
     private stripe: StripeService,
@@ -222,9 +225,10 @@ export class PayoutService {
       throw new BadRequestException(`Seller ${payout.sellerId} has no Stripe account`);
     }
 
-    // Optimistic lock: only transition if still ELIGIBLE (guards concurrent calls)
+    // Phase 1: Optimistic lock — claim the payout atomically.
+    // Use payout.status (not hardcoded 'ELIGIBLE') so retries from FAILED also work.
     const claimed = await this.prisma.payout.updateMany({
-      where: { id: payoutId, status: 'ELIGIBLE' },
+      where: { id: payoutId, status: payout.status },
       data: {
         status: 'PROCESSING',
         attempts: { increment: 1 },
@@ -234,39 +238,64 @@ export class PayoutService {
 
     if (claimed.count === 0) {
       throw new BadRequestException(
-        `Payout ${payoutId} is no longer ELIGIBLE (concurrent transition)`,
+        `Payout ${payoutId} is already being processed (concurrent transition)`,
       );
     }
 
-    try {
-      // Check escrow balance before sending to Stripe
-      const { balance } = await this.ledger.getAccountBalance(payout.escrowAccountId);
-      if (balance < payout.amount) {
-        await this.prisma.payout.update({
-          where: { id: payoutId },
-          data: {
-            status: 'FAILED',
-            failureReason: `Insufficient escrow balance: ${balance}, required: ${payout.amount}`,
-          },
-        });
-        throw new BadRequestException(
-          `Insufficient escrow balance: ${balance}, required: ${payout.amount}`,
-        );
-      }
+    // Phase 2: Stripe transfer.
+    // Idempotency key = payout ID + attempt so retries hit the same Stripe transfer.
+    const idempotencyKey = `payout-${payoutId}-attempt-${payout.attempts + 1}`;
 
-      // Transfer from platform to connected account — Stripe expects cents
-      const transfer = await this.stripe.getStripe().transfers.create({
-        amount: payout.sellerAmount,
-        currency: 'eur',
-        destination: seller.stripeAccountId,
-        metadata: { payoutId: String(payoutId) },
+    // Check escrow balance before touching Stripe
+    const { balance } = await this.ledger.getAccountBalance(payout.escrowAccountId);
+    if (balance < payout.amount) {
+      await this.prisma.payout.update({
+        where: { id: payoutId },
+        data: {
+          status: 'FAILED',
+          failureReason: `Insufficient escrow balance: ${balance}, required: ${payout.amount}`,
+        },
       });
+      throw new BadRequestException(
+        `Insufficient escrow balance: ${balance}, required: ${payout.amount}`,
+      );
+    }
 
-      // Ledger entries: escrow → seller + platform fee
-      // Recover feePercent via integer arithmetic to avoid float drift
-      const feePercent = payout.amount > 0
-        ? Math.round(payout.platformFee * 10000 / payout.amount) / 100
-        : 0;
+    let transfer: { id: string };
+    try {
+      transfer = await this.stripe.getStripe().transfers.create(
+        {
+          amount: payout.sellerAmount,
+          currency: 'eur',
+          destination: seller.stripeAccountId,
+          metadata: { payoutId: String(payoutId) },
+        },
+        { idempotencyKey },
+      );
+    } catch (error) {
+      // Stripe failed — no money moved, safe to mark FAILED and return.
+      // This is an expected business outcome (insufficient funds, Stripe outage, etc.).
+      const reason = error instanceof Error ? error.message : 'Unknown Stripe error';
+      return this.prisma.payout.update({
+        where: { id: payoutId },
+        data: { status: 'FAILED', failureReason: reason },
+      });
+    }
+
+    // Phase 3: Persist transfer ID immediately — CRITICAL.
+    // If ledger posting crashes after this, reconciliation can detect the orphaned transfer
+    // via the stripeTransferId on a FAILED payout record.
+    await this.prisma.payout.update({
+      where: { id: payoutId },
+      data: { stripeTransferId: transfer.id },
+    });
+
+    // Phase 4: Ledger posting + final status.
+    const feePercent = payout.amount > 0
+      ? Math.round(payout.platformFee * 10000 / payout.amount) / 100
+      : 0;
+
+    try {
       await this.ledger.releasePayout({
         amount: payout.amount,
         escrowAccountId: payout.escrowAccountId,
@@ -275,26 +304,28 @@ export class PayoutService {
         platformFeePercent: feePercent,
       });
 
-      // PROCESSING → PAID
       return this.prisma.payout.update({
         where: { id: payoutId },
-        data: {
-          status: 'PAID',
-          stripeTransferId: transfer.id,
-          paidAt: new Date(),
-        },
+        data: { status: 'PAID', paidAt: new Date() },
       });
     } catch (error) {
-      // PROCESSING → FAILED
+      // Stripe transfer succeeded but ledger posting failed.
+      // Money moved but our books don't reflect it — requires manual reconciliation.
       const reason = error instanceof Error ? error.message : 'Unknown error';
-
-      return this.prisma.payout.update({
+      this.logger.error(
+        { payoutId, stripeTransferId: transfer.id, error: reason },
+        'CRITICAL: Stripe transfer succeeded but ledger posting failed. Manual reconciliation required.',
+      );
+      await this.prisma.payout.update({
         where: { id: payoutId },
         data: {
           status: 'FAILED',
-          failureReason: reason,
+          failureReason: `Ledger posting failed after Stripe transfer ${transfer.id}: ${reason}`,
         },
       });
+      throw new Error(
+        `Payout ${payoutId}: Stripe transfer ${transfer.id} succeeded but ledger posting failed. Requires manual reconciliation.`,
+      );
     }
   }
 
@@ -371,11 +402,13 @@ export class PayoutService {
       throw new NotFoundException(`Seller ${payout.sellerId} not found`);
     }
 
-    // Reverse Stripe transfer
+    // Reverse Stripe transfer — idempotent via reversal-scoped key
     if (payout.stripeTransferId) {
       try {
         await this.stripe.getStripe().transfers.createReversal(
           payout.stripeTransferId,
+          {},
+          { idempotencyKey: `reversal-${payoutId}` },
         );
       } catch (error) {
         const reason = error instanceof Error ? error.message : 'Unknown error';
@@ -398,10 +431,7 @@ export class PayoutService {
 
     return this.prisma.payout.update({
       where: { id: payoutId },
-      data: {
-        status: 'FAILED',
-        failureReason: 'Manually reversed',
-      },
+      data: { status: 'REVERSED' },
     });
   }
 

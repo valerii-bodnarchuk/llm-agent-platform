@@ -226,6 +226,25 @@ export class ReconciliationService {
       }
     }
 
+    // Check for FAILED payouts that have a Stripe transfer ID — money may have moved
+    // but ledger posting failed (the critical failure mode from processPayout)
+    const inconsistent = await this.prisma.payout.findMany({
+      where: { status: 'FAILED', stripeTransferId: { not: null } },
+    });
+
+    for (const payout of inconsistent) {
+      results.push({
+        payoutId: payout.id,
+        status: 'mismatch',
+        details: {
+          issue: 'Payout FAILED but has Stripe transfer — money may have been sent without ledger posting',
+          stripeTransferId: payout.stripeTransferId,
+          failureReason: payout.failureReason,
+          action: 'needs_manual_review_and_ledger_correction',
+        },
+      });
+    }
+
     // Check for orphaned payouts (PAID but no Stripe transfer ID)
     const orphaned = await this.prisma.payout.findMany({
       where: { status: 'PAID', stripeTransferId: null },

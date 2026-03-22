@@ -176,6 +176,10 @@ export class TestHarness {
         },
         // Provide a no-op logger to satisfy PinoLogger injection tokens
         {
+          provide: 'PinoLogger:PayoutService',
+          useValue: { info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
+        },
+        {
           provide: 'PinoLogger:LedgerService',
           useValue: { info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
         },

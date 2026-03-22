@@ -21,6 +21,10 @@ describe('PayoutStateMachine', () => {
     it('FAILED → PROCESSING (retry)', () => {
       expect(() => validateTransition('FAILED', 'PROCESSING')).not.toThrow();
     });
+
+    it('PAID → REVERSED (intentional reversal)', () => {
+      expect(() => validateTransition('PAID', 'REVERSED')).not.toThrow();
+    });
   });
 
   describe('invalid transitions', () => {
@@ -34,6 +38,14 @@ describe('PayoutStateMachine', () => {
 
     it('PAID → PROCESSING (terminal state)', () => {
       expect(() => validateTransition('PAID', 'PROCESSING')).toThrow('Invalid payout transition');
+    });
+
+    it('REVERSED → PROCESSING (terminal state)', () => {
+      expect(() => validateTransition('REVERSED', 'PROCESSING')).toThrow('Invalid payout transition');
+    });
+
+    it('REVERSED → FAILED (terminal state)', () => {
+      expect(() => validateTransition('REVERSED', 'FAILED')).toThrow('Invalid payout transition');
     });
 
     it('ELIGIBLE → FAILED (must go through PROCESSING)', () => {

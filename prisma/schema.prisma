@@ -32,6 +32,7 @@ enum PayoutStatus {
   PROCESSING
   PAID
   FAILED
+  REVERSED
 }
 
 enum SellerStatus {
