@@ -155,10 +155,11 @@ describe('LedgerService', () => {
       // Release payout: 5% fee → 500 cents fee, 9500 cents to seller
       await service.releasePayout({
         amount: 10000,
+        feeAmount: 500,
+        sellerAmount: 9500,
         escrowAccountId: escrowId,
         sellerAccountId: sellerId,
         platformFeeAccountId: platformFeeId,
-        platformFeePercent: 5,
       });
 
       const { balance: escrowBalance } = await service.getAccountBalance(escrowId);
@@ -188,18 +189,20 @@ describe('LedgerService', () => {
 
       await service.releasePayout({
         amount: 10000,
+        feeAmount: 500,
+        sellerAmount: 9500,
         escrowAccountId: escrowId,
         sellerAccountId: sellerId,
         platformFeeAccountId: platformFeeId,
-        platformFeePercent: 5,
       });
 
       await service.reversePayout({
         amount: 10000,
+        feeAmount: 500,
+        sellerAmount: 9500,
         escrowAccountId: escrowId,
         sellerAccountId: sellerId,
         platformFeeAccountId: platformFeeId,
-        platformFeePercent: 5,
         reason: 'Test reversal',
       });
 

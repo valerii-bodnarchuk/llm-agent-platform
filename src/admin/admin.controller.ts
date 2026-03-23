@@ -21,6 +21,11 @@ export class AdminController {
     return this.payoutService.getPayoutsByStatus('FAILED');
   }
 
+  @Get('payouts/review')
+  async getPayoutsForReview() {
+    return this.payoutService.getPayoutsByFraudDecision('REVIEW');
+  }
+
   @Get('payouts/blocked')
   async getBlockedPayouts() {
     const failed = await this.payoutService.getPayoutsByStatus('FAILED');

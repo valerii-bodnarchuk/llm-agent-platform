@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
-import { assertMinorUnits, calculateFee } from '../common/money';
+import { assertMinorUnits } from '../common/money';
 
 interface Entry {
   accountId: number;
@@ -184,22 +184,29 @@ export class LedgerService {
   }
 
   async releasePayout(params: {
-    amount: number;  // minor units
+    amount: number;        // total payout in minor units
+    feeAmount: number;     // platform fee in minor units
+    sellerAmount: number;  // seller receives in minor units
     escrowAccountId: number;
     sellerAccountId: number;
     platformFeeAccountId: number;
-    platformFeePercent: number;
   }) {
     assertMinorUnits(params.amount, 'Payout amount');
-    const fee = calculateFee(params.amount, params.platformFeePercent);
-    const sellerAmount = params.amount - fee;
+    assertMinorUnits(params.feeAmount, 'Fee amount');
+    assertMinorUnits(params.sellerAmount, 'Seller amount');
+
+    if (params.feeAmount + params.sellerAmount !== params.amount) {
+      throw new Error(
+        `Fee split mismatch: fee(${params.feeAmount}) + seller(${params.sellerAmount}) != total(${params.amount})`,
+      );
+    }
 
     return this.createTransaction({
-      description: `Payout to seller (${params.amount}, fee: ${fee})`,
+      description: `Payout to seller (${params.amount} cents, fee: ${params.feeAmount} cents)`,
       entries: [
         { accountId: params.escrowAccountId, amount: params.amount, type: 'DEBIT' },
-        { accountId: params.sellerAccountId, amount: sellerAmount, type: 'CREDIT' },
-        { accountId: params.platformFeeAccountId, amount: fee, type: 'CREDIT' },
+        { accountId: params.sellerAccountId, amount: params.sellerAmount, type: 'CREDIT' },
+        { accountId: params.platformFeeAccountId, amount: params.feeAmount, type: 'CREDIT' },
       ],
     });
   }
@@ -258,22 +265,29 @@ export class LedgerService {
   }
 
   async reversePayout(params: {
-    amount: number;  // minor units
+    amount: number;
+    feeAmount: number;
+    sellerAmount: number;
     escrowAccountId: number;
     sellerAccountId: number;
     platformFeeAccountId: number;
-    platformFeePercent: number;
     reason: string;
   }) {
     assertMinorUnits(params.amount, 'Reversal amount');
-    const fee = calculateFee(params.amount, params.platformFeePercent);
-    const sellerAmount = params.amount - fee;
+    assertMinorUnits(params.feeAmount, 'Reversal fee amount');
+    assertMinorUnits(params.sellerAmount, 'Reversal seller amount');
+
+    if (params.feeAmount + params.sellerAmount !== params.amount) {
+      throw new Error(
+        `Reversal split mismatch: fee(${params.feeAmount}) + seller(${params.sellerAmount}) != total(${params.amount})`,
+      );
+    }
 
     return this.createTransaction({
       description: `REVERSAL: ${params.reason}`,
       entries: [
-        { accountId: params.sellerAccountId, amount: sellerAmount, type: 'DEBIT' },
-        { accountId: params.platformFeeAccountId, amount: fee, type: 'DEBIT' },
+        { accountId: params.sellerAccountId, amount: params.sellerAmount, type: 'DEBIT' },
+        { accountId: params.platformFeeAccountId, amount: params.feeAmount, type: 'DEBIT' },
         { accountId: params.escrowAccountId, amount: params.amount, type: 'CREDIT' },
       ],
     });

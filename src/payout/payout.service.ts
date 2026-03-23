@@ -291,17 +291,14 @@ export class PayoutService {
     });
 
     // Phase 4: Ledger posting + final status.
-    const feePercent = payout.amount > 0
-      ? Math.round(payout.platformFee * 10000 / payout.amount) / 100
-      : 0;
-
     try {
       await this.ledger.releasePayout({
         amount: payout.amount,
+        feeAmount: payout.platformFee,
+        sellerAmount: payout.sellerAmount,
         escrowAccountId: payout.escrowAccountId,
         sellerAccountId: seller.accountId,
         platformFeeAccountId: payout.platformFeeAccountId,
-        platformFeePercent: feePercent,
       });
 
       return this.prisma.payout.update({
@@ -374,13 +371,16 @@ export class PayoutService {
     platformFeePercent?: number;
   }) {
     const feePercent = params.platformFeePercent || 5;
+    const feeAmount = calculateFee(params.amount, feePercent);
+    const sellerAmount = params.amount - feeAmount;
 
     return this.ledger.releasePayout({
       amount: params.amount,
+      feeAmount,
+      sellerAmount,
       escrowAccountId: params.escrowAccountId,
       sellerAccountId: params.sellerAccountId,
       platformFeeAccountId: params.platformFeeAccountId,
-      platformFeePercent: feePercent,
     });
   }
 
@@ -417,15 +417,13 @@ export class PayoutService {
     }
 
     // Reverse ledger entries
-    const feePercent = payout.amount > 0
-      ? Math.round(payout.platformFee * 10000 / payout.amount) / 100
-      : 0;
     await this.ledger.reversePayout({
       amount: payout.amount,
+      feeAmount: payout.platformFee,
+      sellerAmount: payout.sellerAmount,
       escrowAccountId: payout.escrowAccountId,
       sellerAccountId: seller.accountId,
       platformFeeAccountId: payout.platformFeeAccountId,
-      platformFeePercent: feePercent,
       reason: `Reversal of payout #${payoutId}`,
     });
 
