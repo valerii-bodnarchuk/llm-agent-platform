@@ -1,6 +1,7 @@
 import Stripe from 'stripe';
 import { Injectable } from '@nestjs/common';
 import { withRetry } from '../common/utils/retry.util';
+import { assertMinorUnits } from '../common/money';
 
 @Injectable()
 export class StripeService {
@@ -12,13 +13,24 @@ export class StripeService {
     });
   }
 
-  async createPaymentIntent(amount: number, currency: string = 'eur', metadata?: Record<string, string>) {
+  async createPaymentIntent(
+    amountCents: number,
+    currency: string = 'eur',
+    metadata?: Record<string, string>,
+    applicationFeeAmount?: number,
+  ) {
+    assertMinorUnits(amountCents, 'PaymentIntent amount');
+    if (applicationFeeAmount !== undefined) {
+      assertMinorUnits(applicationFeeAmount, 'Application fee amount');
+    }
+
     return withRetry(
       () =>
         this.stripe.paymentIntents.create({
-          amount: Math.round(amount * 100),
+          amount: amountCents,
           currency,
           metadata,
+          ...(applicationFeeAmount !== undefined && { application_fee_amount: applicationFeeAmount }),
         }),
       { maxAttempts: 3, delayMs: 1000 },
     );
