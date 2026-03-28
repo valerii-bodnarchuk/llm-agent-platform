@@ -5,7 +5,8 @@ import { StripeService } from '../stripe/stripe.service';
 import { PayoutStatus } from '@prisma/client';
 import { validateTransition } from './payout-state-machine';
 import { FraudService } from '../fraud/fraud.service';
-import { assertMinorUnits, calculateFee } from '../common/money';
+import { assertMinorUnits } from '../common/money';
+import { calculateFee } from '../common/utils/money.util';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 
 @Injectable()
@@ -28,8 +29,7 @@ export class PayoutService {
   }) {
     assertMinorUnits(params.amount, 'Payout amount');
     const feePercent = params.platformFeePercent || 5;
-    const platformFee = calculateFee(params.amount, feePercent);
-    const sellerAmount = params.amount - platformFee;
+    const { fee: platformFee, sellerAmount } = calculateFee(params.amount, feePercent);
 
     // === Duplicate payout protection ===
     const existingPayouts = await this.prisma.payout.findMany({
@@ -371,8 +371,7 @@ export class PayoutService {
     platformFeePercent?: number;
   }) {
     const feePercent = params.platformFeePercent || 5;
-    const feeAmount = calculateFee(params.amount, feePercent);
-    const sellerAmount = params.amount - feeAmount;
+    const { fee: feeAmount, sellerAmount } = calculateFee(params.amount, feePercent);
 
     return this.ledger.releasePayout({
       amount: params.amount,
