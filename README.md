@@ -5,7 +5,7 @@ Production-grade marketplace payment platform with escrow, seller payouts, and f
 **Stack:** NestJS · TypeScript · PostgreSQL · Prisma · Redis · BullMQ · Stripe Connect · Docker
 **Fraud Engine:** Python · FastAPI · rule-based risk scoring
 
-**Live:** [Production URL](https://payment-processing-system-production.up.railway.app) · [Swagger API](https://payment-processing-system-production.up.railway.app/api) · [Health Check](https://payment-processing-system-production.up.railway.app/health)
+**Live:** [Swagger API](https://payment-processing-system-production.up.railway.app/api) · [Health Check](https://payment-processing-system-production.up.railway.app/health)
 
 ---
 
