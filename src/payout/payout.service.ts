@@ -8,6 +8,7 @@ import { FraudService } from '../fraud/fraud.service';
 import { assertMinorUnits } from '../common/money';
 import { calculateFee } from '../common/utils/money.util';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
+import { MetricsService } from '../metrics/metrics.service';
 
 @Injectable()
 export class PayoutService {
@@ -18,6 +19,7 @@ export class PayoutService {
     private ledger: LedgerService,
     private stripe: StripeService,
     private fraud: FraudService,
+    private metrics: MetricsService,
   ) {}
 
   /** Create a payout request (PENDING) */
@@ -177,6 +179,8 @@ export class PayoutService {
       seller_dispute_count: disputeCount,
     });
 
+    this.metrics.fraudDecisions.inc({ decision: fraudResult.decision });
+
     if (fraudResult.decision === 'BLOCK') {
       throw new BadRequestException(
         `Payout blocked by fraud engine (score: ${fraudResult.risk_score}, rules: ${fraudResult.rules_triggered.map(r => r.rule).join(', ')})`,
@@ -276,6 +280,7 @@ export class PayoutService {
       // Stripe failed — no money moved, safe to mark FAILED and return.
       // This is an expected business outcome (insufficient funds, Stripe outage, etc.).
       const reason = error instanceof Error ? error.message : 'Unknown Stripe error';
+      this.metrics.payoutsTotal.inc({ status: 'FAILED' });
       return this.prisma.payout.update({
         where: { id: payoutId },
         data: { status: 'FAILED', failureReason: reason },
@@ -301,6 +306,8 @@ export class PayoutService {
         platformFeeAccountId: payout.platformFeeAccountId,
       });
 
+      this.metrics.payoutsTotal.inc({ status: 'PAID' });
+      this.metrics.payoutAmountTotal.inc({ status: 'PAID' }, Number(payout.sellerAmount));
       return this.prisma.payout.update({
         where: { id: payoutId },
         data: { status: 'PAID', paidAt: new Date() },

@@ -7,6 +7,7 @@ import { DisputeService } from '../dispute/dispute.service';
 import { PinoLogger, InjectPinoLogger } from 'nestjs-pino';
 import { DisputeReason } from '@prisma/client';
 import Stripe from 'stripe';
+import { MetricsService } from '../metrics/metrics.service';
 
 @Injectable()
 export class WebhookService {
@@ -18,6 +19,7 @@ export class WebhookService {
     private ledger: LedgerService,
     private sellerService: SellerService,
     private disputeService: DisputeService,
+    private metrics: MetricsService,
   ) {}
 
   async verifyAndParseWebhook(
@@ -71,6 +73,7 @@ export class WebhookService {
       ],
     });
 
+    this.metrics.stripeWebhooksTotal.inc({ event_type: 'payment_intent.succeeded' });
     this.logger.info({ transactionId: transaction.id, amount }, 'Payment settled');
   }
 
@@ -121,6 +124,7 @@ export class WebhookService {
       stripeDisputeId: dispute.id,
     });
 
+    this.metrics.stripeWebhooksTotal.inc({ event_type: 'charge.dispute.created' });
     this.logger.info(`Dispute created for transaction ${transaction.id}`);
   }
 } 

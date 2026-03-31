@@ -22,6 +22,7 @@ import { StripeService } from '../../src/stripe/stripe.service';
 import { FraudCheckRequest, FraudService } from '../../src/fraud/fraud.service';
 import { IdempotencyService } from '../../src/idempotency/idempotency.service';
 import { SellerService } from '../../src/seller/seller.service';
+import { MetricsService } from '../../src/metrics/metrics.service';
 
 // ── Stripe Mock ──────────────────────────────────────────────────────
 
@@ -198,6 +199,19 @@ export class TestHarness {
         {
           provide: 'PinoLogger:SellerService',
           useValue: { info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
+        },
+        {
+          provide: MetricsService,
+          useValue: {
+            payoutsTotal: { inc: jest.fn() },
+            payoutAmountTotal: { inc: jest.fn() },
+            fraudDecisions: { inc: jest.fn() },
+            ledgerTransactionsTotal: { inc: jest.fn() },
+            stripeWebhooksTotal: { inc: jest.fn() },
+            disputesTotal: { inc: jest.fn() },
+            reconciliationRuns: { inc: jest.fn() },
+            reconciliationMismatches: { set: jest.fn() },
+          },
         },
       ],
     }).compile();

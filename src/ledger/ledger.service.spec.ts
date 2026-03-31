@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { LedgerService } from './ledger.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { MetricsService } from '../metrics/metrics.service';
 import { getLoggerToken } from 'nestjs-pino';
 
 describe('LedgerService', () => {
@@ -20,6 +21,10 @@ describe('LedgerService', () => {
         {
           provide: getLoggerToken(LedgerService.name),
           useValue: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+        },
+        {
+          provide: MetricsService,
+          useValue: { ledgerTransactionsTotal: { inc: jest.fn() } },
         },
       ],
     }).compile();

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { assertMinorUnits } from '../common/money';
+import { MetricsService } from '../metrics/metrics.service';
 
 interface Entry {
   accountId: number;
@@ -26,6 +27,7 @@ export class LedgerService {
     private prisma: PrismaService,
     @InjectPinoLogger(LedgerService.name)
     private readonly logger: PinoLogger,
+    private metrics: MetricsService,
   ) {}
 
   async createTransaction(params: {
@@ -92,6 +94,7 @@ export class LedgerService {
         })),
       });
 
+      this.metrics.ledgerTransactionsTotal.inc();
       return transaction;
     });
   }

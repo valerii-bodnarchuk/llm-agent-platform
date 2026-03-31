@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { MetricsModule } from './metrics/metrics.module';
 import { LedgerModule } from './ledger/ledger.module';
 import { StripeModule } from './stripe/stripe.module';
 import { PaymentModule } from './payment/payment.module';
@@ -51,6 +52,7 @@ import { LoggerModule } from 'nestjs-pino';
         limit: 100,
       },
     ]),
+    MetricsModule,
     DisputeModule,
     AdminModule,
     RedisModule,

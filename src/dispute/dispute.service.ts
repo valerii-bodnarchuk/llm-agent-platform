@@ -5,6 +5,7 @@ import { PayoutService } from '../payout/payout.service';
 import { DisputeStatus, DisputeReason } from '@prisma/client';
 import { validateDisputeTransition } from './dispute-state-machine';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
+import { MetricsService } from '../metrics/metrics.service';
 
 @Injectable()
 export class DisputeService {
@@ -14,6 +15,7 @@ export class DisputeService {
     private prisma: PrismaService,
     private ledger: LedgerService,
     private payoutService: PayoutService,
+    private metrics: MetricsService,
   ) {}
 
   /** Open a dispute — freezes any pending payout */
@@ -97,6 +99,7 @@ export class DisputeService {
       }
     }
 
+    this.metrics.disputesTotal.inc({ resolution: 'WON' });
     return this.prisma.dispute.update({
       where: { id: disputeId },
       data: {
@@ -138,6 +141,7 @@ export class DisputeService {
       });
     });
 
+    this.metrics.disputesTotal.inc({ resolution: 'LOST' });
     return this.getDispute(disputeId);
   }
 
@@ -189,6 +193,7 @@ export class DisputeService {
       }
     }
 
+    this.metrics.disputesTotal.inc({ resolution: 'REFUNDED' });
     return this.prisma.dispute.update({
       where: { id: disputeId },
       data: {
