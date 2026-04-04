@@ -44,13 +44,13 @@ export class ReconciliationService {
       throw new Error(`Transaction ${transactionId} not found`);
     }
 
-    const paymentIntentId = transaction.description.match(/pi_\w+/)?.[0];
-    
+    const paymentIntentId = transaction.stripePaymentIntentId;
+
     if (!paymentIntentId) {
-      return { 
-        transactionId, 
-        status: 'skipped', 
-        details: { reason: 'Not a payment transaction' }
+      return {
+        transactionId,
+        status: 'skipped',
+        details: { reason: 'No Stripe payment intent linked' },
       };
     }
 
@@ -108,7 +108,7 @@ export class ReconciliationService {
     
     const transactions = await this.prisma.transaction.findMany({
       where: {
-        description: { contains: 'Payment' },
+        stripePaymentIntentId: { not: null },
         status: 'PENDING',
         createdAt: { gte: twentyFourHoursAgo },
       },
@@ -138,7 +138,7 @@ export class ReconciliationService {
   async reconcileAll() {
     const transactions = await this.prisma.transaction.findMany({
       where: {
-        description: { contains: 'Payment' },
+        stripePaymentIntentId: { not: null },
       },
       orderBy: { createdAt: 'desc' },
     });
