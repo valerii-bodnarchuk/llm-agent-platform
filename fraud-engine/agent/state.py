@@ -1,0 +1,40 @@
+"""
+Investigation state schema — the single source of truth flowing through the graph.
+
+Design decisions:
+- All fields optional except transaction_id and trigger — graph nodes populate them.
+- audit_trail is append-only within a single investigation run.
+- messages holds the LangChain message history for the ReAct loop.
+- iteration is a safety counter to prevent infinite loops.
+"""
+from __future__ import annotations
+
+from typing import Annotated, Literal
+from typing_extensions import TypedDict
+
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
+
+
+class InvestigationState(TypedDict, total=False):
+    """Typed state for the fraud investigation graph."""
+
+    # ── Input (required) ─────────────────────────────────────────
+    transaction_id: int
+    trigger: Literal["BLOCK", "REVIEW", "MANUAL"]
+
+    # ── Collected context (tools populate these) ─────────────────
+    transaction_data: dict | None
+    seller_profile: dict | None
+    payout_timeline: dict | None
+    fraud_score_detail: dict | None
+    ledger_check: dict | None
+
+    # ── ReAct loop ───────────────────────────────────────────────
+    # add_messages reducer: appends new messages instead of replacing
+    messages: Annotated[list[BaseMessage], add_messages]
+    iteration: int
+
+    # ── Output ───────────────────────────────────────────────────
+    verdict: dict | None
+    audit_trail: list[dict]

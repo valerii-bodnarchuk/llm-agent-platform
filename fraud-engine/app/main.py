@@ -1,3 +1,4 @@
+import logging
 from fastapi import FastAPI
 from app.models import (
     FraudCheckRequest,
@@ -134,6 +135,17 @@ def outcome_stats():
         false_negatives=false_negatives,
         precision=round(true_positives / predicted_positive, 4) if predicted_positive else None,
         recall=round(true_positives / actual_positive, 4) if actual_positive else None,
+    )
+
+
+# ── Investigation Agent (optional — only loads if dependencies are installed) ──
+try:
+    from agent.api import router as agent_router
+    app.include_router(agent_router)
+    logging.getLogger("agent").info("Investigation agent router mounted at /investigate")
+except ImportError:
+    logging.getLogger("agent").info(
+        "Investigation agent not loaded — install langgraph, langchain-core, langchain-openai, httpx"
     )
 
 
