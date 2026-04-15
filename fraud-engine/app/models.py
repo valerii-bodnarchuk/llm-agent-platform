@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class Decision(str, Enum):
@@ -45,8 +45,7 @@ class DetailedFraudCheckResponse(FraudCheckResponse):
 class OutcomeReport(BaseModel):
     transaction_id: int
     original_decision: Decision
-    actual_outcome: str  # "legitimate", "fraudulent", "disputed", "chargeback"
-    from datetime import datetime, timezone
+    actual_outcome: str
     reported_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

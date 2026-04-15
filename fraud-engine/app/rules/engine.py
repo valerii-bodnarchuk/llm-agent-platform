@@ -27,7 +27,7 @@ def check_amount_threshold(req: FraudCheckRequest) -> RuleResult:
                 rule="amount_threshold",
                 triggered=True,
                 score=tier["score"],
-                reason=f"Amount €{req.amount} exceeds €{tier['min_amount']}",
+                reason=f"Amount {req.amount} cents exceeds {tier['min_amount']} cents",
             )
     return RuleResult(rule="amount_threshold", triggered=False, score=0.0)
 
