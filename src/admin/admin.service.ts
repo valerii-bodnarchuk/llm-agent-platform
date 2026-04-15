@@ -201,7 +201,7 @@ export class AdminService {
     let trend: 'increasing' | 'stable' | 'decreasing';
     if (olderVolume === 0 && recentVolume === 0) {
       trend = 'stable';
-    } else if (olderVolume === 0) {
+    } else if (olderVolume === 0 && recentVolume === 0) {
       trend = 'increasing';
     } else {
       const ratio = recentVolume / olderVolume;

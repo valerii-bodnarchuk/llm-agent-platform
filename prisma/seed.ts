@@ -38,7 +38,7 @@ async function main() {
       status: 'ACTIVE',
       chargesEnabled: true,
       payoutsEnabled: true,
-      stripeAccountId: null, // no real Stripe account in seed
+      stripeAccountId: 'acct_test_fake123',
     },
   });
 

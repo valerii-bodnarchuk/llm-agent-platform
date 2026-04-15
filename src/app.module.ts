@@ -56,7 +56,37 @@ import { LoggerModule } from 'nestjs-pino';
     DisputeModule,
     AdminModule,
     RedisModule,
-    LoggerModule,
+    LoggerModule.forRoot({
+      pinoHttp: {
+        customLogLevel: (req, res, err) => {
+          if (res.statusCode >= 500) return 'error';
+          if (res.statusCode >= 400) return 'warn';
+          return 'info';
+        },
+        autoLogging: {
+          ignore: (req) => false,
+        },
+        genReqId: (req) => (req.headers['x-request-id'] as string) || randomUUID(),
+        transport:
+          process.env.NODE_ENV !== 'production'
+            ? { target: 'pino-pretty', options: { colorize: true, singleLine: true } }
+            : undefined,
+        level: process.env.LOG_LEVEL || 'info',
+        serializers: {
+          req: (req) => ({
+            id: req.id,
+            method: req.method,
+            url: req.url,
+          }),
+          res: (res) => ({
+            statusCode: res.statusCode,
+          }),
+        },
+        customProps: () => ({
+          service: 'payment-processing',
+        }),
+      },
+    }),
     HealthModule,
     ReconciliationModule,
     QueueModule,

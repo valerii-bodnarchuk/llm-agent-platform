@@ -165,13 +165,10 @@ export class InvestigationService {
       });
     }
 
-    if (
-      ctx.payout.failureReason &&
-      /stripe|transfer/i.test(ctx.payout.failureReason)
-    ) {
+    if (ctx.payout.failureReason && ctx.payout.status === 'FAILED') {
       findings.push({
         rule: 'stripe_transfer_failed',
-        severity: 'warning',
+        severity: 'critical',
         description: `Stripe transfer failed: ${ctx.payout.failureReason}`,
         evidence: { failureReason: ctx.payout.failureReason },
       });
@@ -267,6 +264,8 @@ export class InvestigationService {
         'Check Stripe webhook delivery. Run reconciliation for this payment intent.',
       no_stripe_account:
         'Seller needs to complete Stripe Connect onboarding.',
+      stripe_transfer_failed:
+        'Check Stripe dashboard for transfer errors. Retry via POST /admin/payouts/:id/force-retry.',
     };
 
     const recommendedActions = findings
