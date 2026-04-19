@@ -21,6 +21,7 @@ async def get_seller_risk_profile(seller_id: int) -> dict:
         return {
             "error": True,
             "tool": "get_seller_risk_profile",
+            "status_code": result.get("status_code"),
             "detail": result.get("detail", "Unknown error"),
         }
 
