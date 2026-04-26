@@ -55,29 +55,70 @@ export class LedgerService {
       throw new Error('Ledger is not balanced');
     }
 
-    // Check sufficient balance for DEBIT entries
-    for (const entry of params.entries) {
-      if (entry.type === 'DEBIT') {
-        const account = await this.prisma.account.findUnique({
-          where: { id: entry.accountId },
-        });
+    return this.prisma.$transaction(async (tx) => {
+      // Acquire FOR NO KEY UPDATE locks on all debited accounts, in ascending id
+      // order to guarantee a consistent lock-acquisition order and prevent deadlocks.
+      //
+      // FOR NO KEY UPDATE (not FOR UPDATE) is intentional: FOR UPDATE conflicts with
+      // the FOR KEY SHARE lock that PostgreSQL takes on referenced Account rows when
+      // a concurrent Entry INSERT validates its FK, which would cause deadlocks.
+      // FOR NO KEY UPDATE does NOT conflict with FOR KEY SHARE, so concurrent Entry
+      // inserts for the same account proceed without blocking while we hold our lock.
+      const debitAccountIds = [
+        ...new Set(
+          params.entries
+            .filter((e) => e.type === 'DEBIT')
+            .map((e) => e.accountId),
+        ),
+      ].sort((a, b) => a - b);
 
-        if (!account) {
-          throw new Error(`Account ${entry.accountId} not found`);
+      for (const accountId of debitAccountIds) {
+        // Step 1: Acquire the row lock.
+        // FOR NO KEY UPDATE is intentional (not FOR UPDATE): FOR UPDATE conflicts
+        // with the FOR KEY SHARE lock PostgreSQL takes on Account rows when
+        // validating FK constraints during Entry inserts, causing deadlocks under
+        // concurrency.  FOR NO KEY UPDATE serialises balance checks across
+        // competing transactions while remaining compatible with FK validation.
+        //
+        // PostgreSQL does not allow locking clauses together with GROUP BY, so
+        // the lock acquisition and the balance aggregation are two separate queries.
+        const accountRows = await tx.$queryRaw<
+          [{ allow_negative: boolean }]
+        >`
+          SELECT "allowNegative" AS allow_negative
+          FROM "Account"
+          WHERE id = ${accountId}
+          FOR NO KEY UPDATE
+        `;
+
+        if (!accountRows[0]) {
+          throw new Error(`Account ${accountId} not found`);
         }
 
-        const { balance } = await this.getAccountBalance(entry.accountId);
-        const wouldBeBalance = balance - entry.amount;
+        // Step 2: Read committed balance.  Because we hold FOR NO KEY UPDATE on
+        // this Account row, every concurrent writer must also acquire that lock
+        // before it can commit new Entry rows, so we see the fully-settled balance.
+        const balanceRows = await tx.$queryRaw<[{ balance: string }]>`
+          SELECT COALESCE(
+            SUM(CASE WHEN type = 'CREDIT' THEN amount ELSE -amount END), 0
+          )::text AS balance
+          FROM "Entry"
+          WHERE "accountId" = ${accountId}
+        `;
 
-        if (wouldBeBalance < 0 && !account.allowNegative) {
+        const balance = parseInt(balanceRows[0].balance, 10);
+        const totalDebit = params.entries
+          .filter((e) => e.accountId === accountId && e.type === 'DEBIT')
+          .reduce((sum, e) => sum + e.amount, 0);
+        const wouldBeBalance = balance - totalDebit;
+
+        if (wouldBeBalance < 0 && !accountRows[0].allow_negative) {
           throw new Error(
-            `Insufficient funds in account ${entry.accountId}. Balance: ${balance}, Required: ${entry.amount}`,
+            `Insufficient funds in account ${accountId}. Balance: ${balance}, Required: ${totalDebit}`,
           );
         }
       }
-    }
 
-    return this.prisma.$transaction(async (tx) => {
       const transaction = await tx.transaction.create({
         data: {
           description: params.description,
@@ -123,28 +164,6 @@ export class LedgerService {
       throw new Error('Ledger is not balanced');
     }
 
-    // Check sufficient balance for DEBIT entries
-    for (const entry of params.entries) {
-      if (entry.type === 'DEBIT') {
-        const account = await this.prisma.account.findUnique({
-          where: { id: entry.accountId },
-        });
-
-        if (!account) {
-          throw new Error(`Account ${entry.accountId} not found`);
-        }
-
-        const { balance } = await this.getAccountBalance(entry.accountId);
-        const wouldBeBalance = balance - entry.amount;
-
-        if (wouldBeBalance < 0 && !account.allowNegative) {
-          throw new Error(
-            `Insufficient funds in account ${entry.accountId}. Balance: ${balance}, Required: ${entry.amount}`,
-          );
-        }
-      }
-    }
-
     return this.prisma.$transaction(async (tx) => {
       const transaction = await tx.transaction.findUnique({
         where: { id: params.transactionId },
@@ -168,6 +187,51 @@ export class LedgerService {
         throw new Error(
           `Transaction ${params.transactionId} already has entries — double settlement prevented`,
         );
+      }
+
+      // Same locking strategy as createTransaction: lock debited accounts in
+      // ascending id order with FOR NO KEY UPDATE before checking balances.
+      const debitAccountIds = [
+        ...new Set(
+          params.entries
+            .filter((e) => e.type === 'DEBIT')
+            .map((e) => e.accountId),
+        ),
+      ].sort((a, b) => a - b);
+
+      for (const accountId of debitAccountIds) {
+        const accountRows = await tx.$queryRaw<
+          [{ allow_negative: boolean }]
+        >`
+          SELECT "allowNegative" AS allow_negative
+          FROM "Account"
+          WHERE id = ${accountId}
+          FOR NO KEY UPDATE
+        `;
+
+        if (!accountRows[0]) {
+          throw new Error(`Account ${accountId} not found`);
+        }
+
+        const balanceRows = await tx.$queryRaw<[{ balance: string }]>`
+          SELECT COALESCE(
+            SUM(CASE WHEN type = 'CREDIT' THEN amount ELSE -amount END), 0
+          )::text AS balance
+          FROM "Entry"
+          WHERE "accountId" = ${accountId}
+        `;
+
+        const balance = parseInt(balanceRows[0].balance, 10);
+        const totalDebit = params.entries
+          .filter((e) => e.accountId === accountId && e.type === 'DEBIT')
+          .reduce((sum, e) => sum + e.amount, 0);
+        const wouldBeBalance = balance - totalDebit;
+
+        if (wouldBeBalance < 0 && !accountRows[0].allow_negative) {
+          throw new Error(
+            `Insufficient funds in account ${accountId}. Balance: ${balance}, Required: ${totalDebit}`,
+          );
+        }
       }
 
       await tx.entry.createMany({
