@@ -29,6 +29,7 @@ class InvestigationState(TypedDict, total=False):
     payout_timeline: dict | None
     fraud_score_detail: dict | None
     ledger_check: dict | None
+    similar_cases: dict | None
 
     # ── ReAct loop ───────────────────────────────────────────────
     # add_messages reducer: appends new messages instead of replacing

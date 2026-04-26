@@ -11,6 +11,7 @@ from agent.tools.seller import get_seller_risk_profile
 from agent.tools.timeline import get_payout_timeline
 from agent.tools.ledger import check_ledger_consistency
 from agent.tools.fraud_score import get_fraud_score_explanation
+from agent.tools.similar_cases import find_similar_cases
 
 
 # ── Fixtures ─────────────────────────────────────────────────────
@@ -203,3 +204,18 @@ async def test_tool_handles_connection_error():
 
     assert result["error"] is True
     assert "Connection" in result["detail"]
+
+
+@pytest.mark.asyncio
+async def test_find_similar_cases_success():
+    result = await find_similar_cases.ainvoke({
+        "transaction_id": 1,
+        "fraud_decision": "BLOCK",
+        "fraud_score": 0.75,
+        "findings": ["velocity", "failed_history"],
+        "limit": 2,
+    })
+
+    assert result["count"] >= 1
+    assert result["cases"][0]["case_id"] == "case_velocity_spike_true_positive"
+    assert result["cases"][0]["verdict"] == "TRUE_POSITIVE"

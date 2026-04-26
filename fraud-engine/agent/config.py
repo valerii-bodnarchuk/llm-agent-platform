@@ -12,3 +12,7 @@ OPENAI_MODEL = os.getenv("AGENT_LLM_MODEL", "gpt-4o-mini")
 
 # Agent limits
 MAX_ITERATIONS = 8
+
+# Similar-case retrieval
+SIMILAR_CASES_DEFAULT_LIMIT = 3
+SIMILAR_CASES_MAX_LIMIT = 5

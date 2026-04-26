@@ -56,6 +56,7 @@ async def start_node(state: InvestigationState) -> dict:
         "payout_timeline": None,
         "fraud_score_detail": None,
         "ledger_check": None,
+        "similar_cases": None,
     }
 
 
@@ -169,7 +170,8 @@ async def synthesize_node(state: InvestigationState) -> dict:
     """
     llm = _get_llm()
 
-    # Build synthesis request with all collected data
+    # Tool messages already include similar-case retrieval output when the LLM
+    # called find_similar_cases. Keep them in context as advisory evidence.
     synthesis_messages = [
         SystemMessage(content=SYNTHESIS_PROMPT),
         HumanMessage(content=(

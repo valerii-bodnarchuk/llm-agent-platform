@@ -7,6 +7,7 @@ from agent.tools.seller import get_seller_risk_profile
 from agent.tools.timeline import get_payout_timeline
 from agent.tools.fraud_score import get_fraud_score_explanation
 from agent.tools.ledger import check_ledger_consistency
+from agent.tools.similar_cases import find_similar_cases
 
 ALL_TOOLS = [
     get_transaction_context,
@@ -14,4 +15,5 @@ ALL_TOOLS = [
     get_payout_timeline,
     get_fraud_score_explanation,
     check_ledger_consistency,
+    find_similar_cases,
 ]
