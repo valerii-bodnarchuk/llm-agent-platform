@@ -64,6 +64,29 @@ jobs:
       - run: npx prisma migrate deploy
       - run: npx jest --runInBand --verbose
 
+  fraud-engine-test:
+    name: Fraud Engine Offline Tests
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: fraud-engine/requirements.txt
+      - run: python -m pip install --upgrade pip
+      - run: pip install -r fraud-engine/requirements.txt
+      - working-directory: fraud-engine
+        run: >-
+          pytest
+          tests/test_rules.py
+          tests/test_api.py
+          tests/test_agent_tools.py
+          tests/test_agent_graph.py
+          tests/test_agent_rag.py
+          -v
+
   docker:
     name: Docker Build
     needs: test
