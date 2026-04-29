@@ -1,7 +1,45 @@
+import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
 from fastapi.testclient import TestClient
+from langchain_core.messages import AIMessage
+
 from app.main import app
 
 client = TestClient(app)
+
+
+def make_tool_call_message(tool_name: str, args: dict, call_id: str = "call_1") -> AIMessage:
+    return AIMessage(
+        content="",
+        tool_calls=[{
+            "name": tool_name,
+            "args": args,
+            "id": call_id,
+        }],
+    )
+
+
+def make_completion_message() -> AIMessage:
+    return AIMessage(content="INVESTIGATION_COMPLETE")
+
+
+def make_verdict_response() -> AIMessage:
+    return AIMessage(content=json.dumps({
+        "verdict": "FALSE_POSITIVE",
+        "confidence": 0.82,
+        "risk_level": "low",
+        "summary": "Similar amount-threshold cases supported a false-positive conclusion.",
+        "key_findings": ["Amount threshold matched historical false positives."],
+        "evidence": [
+            {
+                "source": "find_similar_cases",
+                "fact": "Most similar case was an amount-threshold false positive.",
+                "significance": "Supports calibration after direct evidence is checked.",
+            }
+        ],
+        "recommended_actions": ["Manual approval after settlement confirmation."],
+    }))
 
 
 def test_health():
@@ -117,3 +155,74 @@ def test_outcomes_false_positive_counted():
     })
     after = client.get("/outcomes/stats").json()["false_positives"]
     assert after == before + 1
+
+
+def test_investigate_route_uses_similar_cases_tool():
+    call_count = 0
+    captured_synthesis_prompt = {"content": ""}
+
+    async def mock_ainvoke(messages, *args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return make_tool_call_message(
+                "find_similar_cases",
+                {
+                    "transaction_id": 123,
+                    "seller_id": 7,
+                    "fraud_decision": "REVIEW",
+                    "fraud_score": 0.45,
+                    "findings": ["amount_threshold"],
+                    "limit": 2,
+                },
+            )
+        if call_count == 2:
+            return make_completion_message()
+
+        captured_synthesis_prompt["content"] = "\n".join(
+            msg.content or ""
+            for msg in messages
+            if hasattr(msg, "content") and msg.content
+        )
+        return make_verdict_response()
+
+    async def mock_nestjs_get(path: str, params: dict | None = None):  # noqa: ARG001
+        if path == "/investigate/transaction/123":
+            return {
+                "transactionId": 123,
+                "transactionStatus": "COMPLETED",
+                "hasPayouts": True,
+                "payoutReports": [{"sellerId": 7, "findings": []}],
+            }
+        if path == "/admin/sellers/7/risk-profile":
+            return {"seller": {"id": 7}, "riskMetrics": {"totalDisputes": 0}}
+        if path == "/admin/sellers/7/payout-timeline":
+            return {"timeline": [], "summary": {"totalCount": 0}}
+        return {"error": True, "detail": f"unexpected path {path}"}
+
+    mock_llm = AsyncMock()
+    mock_llm.ainvoke = mock_ainvoke
+    mock_llm.bind_tools = MagicMock(return_value=mock_llm)
+
+    with patch("agent.nodes._get_llm", return_value=mock_llm), \
+            patch("agent.nodes.nestjs_get", new=mock_nestjs_get):
+        response = client.post("/investigate", json={
+            "transaction_id": 123,
+            "trigger": "REVIEW",
+        })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["transaction_id"] == 123
+    assert data["verdict"]["verdict"] == "FALSE_POSITIVE"
+    assert data["verdict"]["evidence"][0]["source"] == "find_similar_cases"
+    assert isinstance(data["audit_trail"], list)
+    actions = [entry["action"] for entry in data["audit_trail"]]
+    assert "investigation_started" in actions
+    assert "context_collected" in actions
+    assert "llm_reasoning" in actions
+    assert actions.count("llm_reasoning") == 2
+    assert "verdict_produced" in actions
+    assert "investigation_complete" in actions
+    assert data["iterations_used"] == 2
+    assert "case_amount_threshold_false_positive" in captured_synthesis_prompt["content"]
