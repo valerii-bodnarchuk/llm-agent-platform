@@ -226,3 +226,49 @@ def test_investigate_route_uses_similar_cases_tool():
     assert "investigation_complete" in actions
     assert data["iterations_used"] == 2
     assert "case_amount_threshold_false_positive" in captured_synthesis_prompt["content"]
+
+
+def test_investigate_route_returns_inconclusive_when_llm_fails():
+    async def failing_ainvoke(messages, *args, **kwargs):  # noqa: ARG001
+        raise RuntimeError("llm unavailable")
+
+    async def mock_nestjs_get(path: str, params: dict | None = None):  # noqa: ARG001
+        if path == "/investigate/transaction/456":
+            return {
+                "transactionId": 456,
+                "transactionStatus": "COMPLETED",
+                "hasPayouts": True,
+                "payoutReports": [{"sellerId": 8, "findings": []}],
+            }
+        if path == "/admin/sellers/8/risk-profile":
+            return {"seller": {"id": 8}, "riskMetrics": {"totalDisputes": 0}}
+        if path == "/admin/sellers/8/payout-timeline":
+            return {"timeline": [], "summary": {"totalCount": 0}}
+        return {"error": True, "detail": f"unexpected path {path}"}
+
+    mock_llm = AsyncMock()
+    mock_llm.ainvoke = failing_ainvoke
+    mock_llm.bind_tools = MagicMock(return_value=mock_llm)
+
+    with patch("agent.nodes._get_llm", return_value=mock_llm), \
+            patch("agent.nodes.nestjs_get", new=mock_nestjs_get):
+        response = client.post("/investigate", json={
+            "transaction_id": 456,
+            "trigger": "MANUAL",
+        })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["transaction_id"] == 456
+    assert data["verdict"]["verdict"] == "INCONCLUSIVE"
+    assert data["verdict"]["confidence"] == 0.1
+    assert data["iterations_used"] == 1
+
+    actions = [entry["action"] for entry in data["audit_trail"]]
+    assert "context_collected" in actions
+    assert actions.count("llm_error") == 2
+    assert "verdict_produced" in actions
+    assert "investigation_complete" in actions
+
+    llm_errors = [entry for entry in data["audit_trail"] if entry["action"] == "llm_error"]
+    assert [entry["stage"] for entry in llm_errors] == ["reason", "synthesize"]

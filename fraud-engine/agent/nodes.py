@@ -14,7 +14,7 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from agent.config import MAX_ITERATIONS, OPENAI_MODEL
 from agent.prompts import REACT_SYSTEM_PROMPT, SYNTHESIS_PROMPT
@@ -29,6 +29,25 @@ def _get_llm():
     """Lazy LLM init — avoids import-time API key requirement for tests."""
     from langchain_openai import ChatOpenAI
     return ChatOpenAI(model=OPENAI_MODEL, temperature=0)
+
+
+def _fallback_verdict(reason: str) -> dict:
+    """Safe manual-review verdict when the LLM cannot produce a conclusion."""
+    return {
+        "verdict": "INCONCLUSIVE",
+        "confidence": 0.1,
+        "risk_level": "medium",
+        "summary": f"Agent could not complete LLM reasoning: {reason}",
+        "key_findings": ["LLM investigation step failed."],
+        "evidence": [
+            {
+                "source": "agent_runtime",
+                "fact": reason,
+                "significance": "A human investigator must review the collected deterministic context.",
+            }
+        ],
+        "recommended_actions": ["Manual review required — LLM investigation unavailable."],
+    }
 
 
 # ── Start ────────────────────────────────────────────────────────
@@ -141,10 +160,26 @@ async def reason_node(state: InvestigationState) -> dict:
     2. Says INVESTIGATION_COMPLETE → routed to synthesize
     3. Hits iteration cap → forced to synthesize
     """
-    llm = _get_llm().bind_tools(ALL_TOOLS)
-    response = await llm.ainvoke(state["messages"])
-
     new_iteration = state.get("iteration", 0) + 1
+    try:
+        llm = _get_llm().bind_tools(ALL_TOOLS)
+        response = await llm.ainvoke(state["messages"])
+    except Exception as e:
+        detail = str(e)
+        logger.exception("LLM reasoning failed")
+        audit_entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "action": "llm_error",
+            "stage": "reason",
+            "iteration": new_iteration,
+            "detail": detail[:500],
+        }
+
+        return {
+            "messages": [AIMessage(content="INVESTIGATION_COMPLETE")],
+            "iteration": new_iteration,
+            "audit_trail": state.get("audit_trail", []) + [audit_entry],
+        }
 
     audit_entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -184,7 +219,30 @@ async def synthesize_node(state: InvestigationState) -> dict:
         )),
     ]
 
-    response = await llm.ainvoke(synthesis_messages)
+    try:
+        response = await llm.ainvoke(synthesis_messages)
+    except Exception as e:
+        detail = str(e)
+        logger.exception("LLM synthesis failed")
+        verdict = _fallback_verdict(detail)
+        audit_entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "action": "llm_error",
+            "stage": "synthesize",
+            "detail": detail[:500],
+        }
+        verdict_entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "action": "verdict_produced",
+            "verdict": verdict.get("verdict"),
+            "confidence": verdict.get("confidence"),
+            "risk_level": verdict.get("risk_level"),
+        }
+
+        return {
+            "verdict": verdict,
+            "audit_trail": state.get("audit_trail", []) + [audit_entry, verdict_entry],
+        }
 
     # Parse the JSON verdict
     verdict = None
