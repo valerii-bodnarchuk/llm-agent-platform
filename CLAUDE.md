@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Commit Authorship
+
+Every commit must end with exactly this trailer — no variations, no model name suffix:
+
+```
+Co-Authored-By: Claude <noreply@anthropic.com>
+```
+
+The primary author is always the git user (`valerii.bodnarchuk <bodnarchukvalole@gmail.com>`), set by the local git config. Claude is the co-author. This ensures the contribution graph on GitHub shows commits as belonging to the primary author.
+
 ## Commands
 
 ### NestJS Backend
