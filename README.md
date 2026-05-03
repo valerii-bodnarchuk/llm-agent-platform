@@ -1,191 +1,268 @@
-# Payment Processing System
+# Distributed Systems Reliability Patterns Applied to LLM Agent Infrastructure
 
-Production-grade marketplace payment platform with escrow, seller payouts, and fraud detection.
+**Production-discipline reference implementation** — double-entry ledger, idempotent write paths, `SELECT FOR NO KEY UPDATE` concurrency, state machine enforcement, reconciliation drift detection, and a LangGraph ReAct agent treated as an untrusted external subsystem with a hard read-only tool boundary, bounded iteration, and audit-grade logging.
 
-**Stack:** NestJS · TypeScript · PostgreSQL · Prisma · Redis · BullMQ · Stripe Connect · Docker
-**Fraud Engine:** Python · FastAPI · rule-based risk scoring
-
-**Live:** [Swagger API](https://payment-processing-system-production.up.railway.app/api) · [Health Check](https://payment-processing-system-production.up.railway.app/health)
+**Stack:** NestJS · TypeScript · PostgreSQL · Prisma · Redis · BullMQ · Python · FastAPI · LangGraph  
+**Domain:** Stripe Connect marketplace payments — chosen because money gives unambiguous correctness signals (debits must equal credits, state transitions are enumerable, Stripe gives an objective reconciliation target).
 
 ---
 
-## What This Is
+## Why This Exists
 
-A mini payment platform that handles the full lifecycle: payment intake → escrow holding → fraud screening → seller payout → dispute resolution → reconciliation. Built as a portfolio project targeting senior fintech backend roles — every design decision is intentional and defensible.
+Most LLM agent demos skip the hard parts: what happens when the model loops indefinitely, a tool returns a 503, or synthesis produces malformed JSON? This project applies the same reliability discipline you'd use for any untrusted external dependency — because that's exactly what an LLM is.
 
-The system processes payments through Stripe, holds funds in escrow via a double-entry ledger, screens payouts through a Python fraud engine, and reconciles internal state against Stripe on a schedule.
+**The patterns demonstrated here apply to any agent infrastructure, independent of domain:**
+
+- **Bounded iteration** — the ReAct loop has a hard cap (default: 8). The graph force-synthesizes at the cap rather than running forever. Token spend is bounded by design, not by hope.
+- **Fail-open, not fail-silent** — if the fraud engine (or any downstream service) is unreachable, the system routes to `REVIEW`, not `BLOCK` or silent `ALLOW`. Humans stay in the loop. The same principle applies to the agent: unparseable synthesis output produces an `INCONCLUSIVE` verdict, never an unhandled exception.
+- **Audit-grade logging** — every LLM reasoning step, tool invocation result, and final verdict is appended to an immutable audit trail with ISO 8601 timestamps. The trail is persisted to PostgreSQL. Investigations are reproducible.
+- **Read-only agent boundary** — the LangGraph agent has zero write access to the ledger or payout state. It observes and recommends; a human-in-the-loop gate approves. Enforced structurally: the tool registry contains no mutation endpoints.
+- **Idempotent write paths throughout** — from payment intake to payout settlement to reconciliation, every mutation that can be retried is safe to retry. This is the same discipline that makes the agent's tool calls safe to re-invoke after a transient failure.
+
+The fintech domain was chosen specifically because it has ground truth: debits must equal credits, state transitions are enumerable, and reconciliation against Stripe gives an objective correctness signal. These properties make it possible to write deterministic tests for inherently nondeterministic agent behavior — without an LLM API key in CI.
+
+---
 
 ## Architecture
 
+```mermaid
+flowchart TB
+    subgraph EXT["External"]
+        STRIPE["Stripe Connect\n(PaymentIntents · Transfers · Disputes · Connect)"]
+    end
+
+    subgraph L1["Core Transactional Layer — NestJS / TypeScript / PostgreSQL"]
+        WH["Webhook Handler\nHMAC-verified · idempotent on event.id"]
+        SM["State Machines\nPayout: PENDING→ELIGIBLE→PROCESSING→PAID/FAILED/REVERSED\nDispute: OPEN→UNDER_REVIEW→WON/LOST/REFUNDED"]
+        PS["Payout Service\nfraud gate · idempotent writes\nSELECT FOR NO KEY UPDATE"]
+        LEDGER["Double-Entry Ledger\natomic · immutable · integer minor units\nΣdebits = Σcredits enforced"]
+        QUEUE["BullMQ Workers\nasync · exponential backoff · DLQ"]
+        RECON["Reconciliation Engine\nStripe ↔ Ledger drift detection\nhourly + daily"]
+        FRAUD["Fraud Engine\nPython · FastAPI · 6 deterministic rules\nfail-open: unreachable → REVIEW"]
+    end
+
+    subgraph L2["LLM Investigation Layer — Python / FastAPI / LangGraph"]
+        AGENT["ReAct Agent\nLangGraph · bounded iterations · force-synthesize at cap"]
+        TOOLS["Read-Only Tools ── no write access\nget_transaction_context\nget_seller_risk_profile\ncheck_ledger_consistency\nget_fraud_score_explanation\nget_payout_timeline"]
+        HITL["Human-in-the-Loop Gate\napprove · reject · escalate"]
+        AUDIT["Audit Trail\nimmutable · timestamped · every reasoning step\npersisted to PostgreSQL"]
+    end
+
+    STRIPE -->|"signed webhooks"| WH
+    WH --> SM
+    SM --> PS
+    PS -->|"synchronous fraud check\nfail-open on timeout"| FRAUD
+    PS --> LEDGER
+    PS --> QUEUE
+    QUEUE -->|"Stripe transfers"| STRIPE
+    LEDGER -->|"integrity checks"| RECON
+    RECON -->|"drift queries"| STRIPE
+
+    L1 -->|"read-only HTTP\nno write access"| TOOLS
+    TOOLS --> AGENT
+    AGENT --> HITL
+    AGENT --> AUDIT
 ```
-┌──────────────┐     ┌──────────────┐     ┌──────────────────┐
-│   Stripe      │────▶│  Webhooks    │────▶│  State Machine   │
-│  (PaymentIntent,   │  (signature   │     │  (payout/dispute │
-│   Connect,    │     │   verified)  │     │   transitions)   │
-│   Disputes)   │◀────│              │     └────────┬─────────┘
-└──────────────┘     └──────────────┘              │
-                                                    ▼
-┌──────────────┐     ┌──────────────┐     ┌──────────────────┐
-│  BullMQ       │────▶│  Payout      │────▶│  Double-Entry    │
-│  (async jobs, │     │  Service     │     │  Ledger          │
-│   cron,       │     │  (fraud gate,│     │  (immutable,     │
-│   retries)    │     │   Stripe xfer│     │   atomic, balanced│
-└──────────────┘     └──────┬───────┘     └──────────────────┘
-                            │
-                            ▼
-                     ┌──────────────┐     ┌──────────────────┐
-                     │  Fraud Engine │     │  Reconciliation  │
-                     │  (Python,    │     │  (hourly + daily, │
-                     │   6 rules,   │     │   Stripe vs       │
-                     │   fail-open) │     │   ledger vs DB)   │
-                     └──────────────┘     └──────────────────┘
-```
-
-### Money Flow
-
-1. **Payment intake** — Buyer creates PaymentIntent via Stripe. Ledger books `BUYER DEBIT → ESCROW CREDIT` atomically. Idempotency via Redis (24h TTL).
-2. **Webhook confirmation** — Stripe `payment_intent.succeeded` marks transaction COMPLETED. Lookup by `stripePaymentIntentId` (indexed, O(1)).
-3. **Payout creation** — Platform creates payout with fee split. Fee calculation uses `calculateFee()` — rounds to nearest cent first, derives seller amount by subtraction. Zero float drift.
-4. **Fraud gate** — Python engine scores payout (0.0–1.0). `< 0.3` ALLOW, `0.3–0.7` REVIEW, `≥ 0.7` BLOCK. Fail-open: engine down → REVIEW, not BLOCK.
-5. **Stripe transfer** — Escrow balance validated before Stripe Transfer. Ledger books `ESCROW DEBIT → SELLER CREDIT + PLATFORM_FEE CREDIT` only after successful transfer.
-6. **Reconciliation** — Hourly (24h window) and daily (all-time) jobs compare internal state vs Stripe. Detects: amount mismatches, orphaned transfers, reversed transfers, ledger imbalances.
-
-### Payout State Machine
-
-```
-PENDING ──▶ ELIGIBLE ──▶ PROCESSING ──▶ PAID
-                              │
-                              ▼
-                           FAILED ──▶ PROCESSING (retry, max 3)
-```
-
-Transitions enforced by `validateTransition()` — invalid transitions return 400. No implicit state changes.
-
-### Dispute State Machine
-
-```
-OPEN ──▶ UNDER_REVIEW ──▶ WON (seller wins, unfreeze payout)
-                     ├──▶ LOST (buyer wins, reverse payout)
-                     └──▶ REFUNDED (full refund, escrow → buyer)
-```
-
-Opening a dispute auto-freezes pending/eligible payouts on that transaction.
 
 ---
 
-## Design Decisions & Trade-offs
+## Distributed Systems Patterns
 
-### Double-entry ledger — why not just track balances?
+### Idempotent Write Paths
 
-Balance tracking is simpler but loses auditability. With double-entry, every cent is traceable: you can reconstruct any account's balance from entries alone, detect tampering, and prove correctness. The ledger runs `verifyIntegrity()` checks: total debits must equal total credits across the entire system, and each transaction's entries must balance independently.
+Payment intake is idempotent via Redis-cached `idempotencyKey` (24h TTL). The `stripePaymentIntentId` carries a DB-level `@unique` constraint — concurrent requests sharing the same key commit exactly one `Transaction` row; the rest receive a unique-constraint rejection rather than a duplicate write. This holds across multiple Node processes and survives Redis downtime: the DB constraint is the authoritative guard, Redis is a latency optimization.
 
-**Trade-off:** More writes per operation (N entries vs 1 balance update). Acceptable because financial correctness > write performance at this scale.
+Payout settlement uses the same discipline: ledger entries are written only after the Stripe transfer succeeds, inside a single `prisma.$transaction()` with the payout status update. A Stripe failure leaves the ledger untouched; a ledger failure rolls back the status update.
 
-### Immutable ledger entries — why not update?
+### TOCTOU Race Elimination (`SELECT FOR NO KEY UPDATE`)
 
-Corrections are appended as reversal entries, never by modifying existing rows. This matches how real accounting systems work: you don't erase history, you record adjustments. Makes audit trails unambiguous and prevents a class of bugs where partial updates leave the ledger inconsistent.
+The original balance check ran outside `prisma.$transaction()`, opening a classic TOCTOU window. With 20 concurrent debits against a 500-cent escrow: each read the same pre-committed balance, each passed the guard, final ledger balance reached −1,400 cents.
 
-### Fee calculation via `calculateFee()` — why centralize?
+The fix moves the balance check inside the transaction and acquires a `SELECT ... FOR NO KEY UPDATE` row lock on each debited account, sorted by ascending `id` to enforce a consistent lock-acquisition order and prevent deadlocks.
 
-Three call sites compute fee splits (createPayout, releasePayout, reversePayout). Before centralization, each did `amount * (percent / 100)` independently — JS float arithmetic. `calculateFee()` rounds fee to nearest cent first, then derives seller amount by subtraction. Invariant enforced: `fee + sellerAmount === amount`. Zero float drift on the entire money pipeline.
+`FOR NO KEY UPDATE` (not `FOR UPDATE`) is intentional: `FOR UPDATE` conflicts with the `FOR KEY SHARE` lock PostgreSQL takes on referenced `Account` rows during FK validation of concurrent `Entry` inserts, causing deadlocks under load. `FOR NO KEY UPDATE` serialises competing balance checks while remaining compatible with FK key-share locks.
 
-**Why not integer cents everywhere?** That requires a DB migration (`Decimal` → `Int`), API contract change, and rewriting all test fixtures. Tracked as a separate work item. The current approach eliminates arithmetic drift without those breaking changes.
+PostgreSQL forbids locking clauses with `GROUP BY`, so lock acquisition and balance aggregation are two sequential queries inside the same transaction — lock first, then aggregate.
 
-### Fail-open fraud engine — why not fail-closed?
+Validated by `ledger.concurrency.spec.ts`: 20 parallel debits against a 500-cent escrow → exactly 5 succeed, 15 rejected with `Insufficient funds`, final balance exactly 0, global ledger balanced.
 
-If the fraud engine is down and we fail-closed (BLOCK), legitimate sellers can't get paid. Platform revenue stops. Fail-open with REVIEW means payouts queue for manual review rather than being rejected. A human can release them once the engine recovers.
+### State Machine Enforcement
 
-**Why not fail-silent (ALLOW)?** That defeats the purpose of fraud detection. REVIEW is the middle ground: no money moves without either automated approval or human review.
+Both payout and dispute lifecycles use explicit transition tables enforced by `validateTransition()`. Invalid transitions return 400. There are no implicit state changes anywhere in the codebase — every status update goes through the validator.
 
-### Synchronous fraud check — why not async?
+```
+Payout:  PENDING → ELIGIBLE → PROCESSING → PAID
+                                    └──────→ FAILED → PROCESSING (retry, max 3)
+                                    └──────→ REVERSED
 
-The fraud check runs in `markEligible()` before the payout enters PROCESSING. Async would mean payouts could enter PROCESSING before fraud scoring completes, requiring a rollback path from PROCESSING → BLOCKED. Synchronous is simpler and the latency (~50ms to the Python service) is acceptable for a batch payout pipeline.
+Dispute: OPEN → UNDER_REVIEW → WON
+                           ├──→ LOST
+                           └──→ REFUNDED
+```
 
-### BullMQ for payout processing — why not process inline?
+Opening a dispute auto-freezes any `PENDING` or `ELIGIBLE` payouts on the affected transaction — the freeze is a side effect of the transition, not a separate call site.
 
-Stripe transfers can take seconds and may fail transiently. Processing inline in the HTTP request means the caller blocks and retries are the caller's problem. BullMQ gives us: automatic retries with exponential backoff, dead letter queue visibility, cron-scheduled daily batch payouts, and the ability to rate-limit outbound Stripe calls.
+### Fail-Open Integration (External Services as Untrusted Subsystems)
 
-### Stripe Connect Express (not Custom) — why?
+The Python fraud engine is treated as an untrusted external dependency with an explicit failure mode contract:
 
-Express accounts handle KYC/identity verification entirely on Stripe's side. Custom accounts give more control but require the platform to build its own KYC flows — out of scope for this project and a regulatory liability in production. Express is what most marketplaces start with.
+- **Unreachable / timeout** → route to `REVIEW`, not `BLOCK` (which would stop legitimate payouts) and not `ALLOW` (which defeats fraud detection)
+- **`REVIEW` gate** → payout holds until a human explicitly releases or rejects it
 
-### No auth/RBAC — conscious omission
+This same fail-open principle applies everywhere an external subsystem is in the critical path:
 
-This project focuses on financial correctness, not access control. Auth is well-solved (JWT, OAuth, Passport.js) and doesn't demonstrate fintech-specific engineering. On an interview: "I chose to invest the complexity budget in the ledger, fraud engine, and reconciliation rather than reimplementing JWT auth."
+- Webhook arrives before payment intent exists → log and skip; reconciliation catches it
+- Stripe transfer fails → payout → `FAILED`, ledger untouched; BullMQ retries with exponential backoff
+- LLM synthesis produces malformed JSON → `INCONCLUSIVE` verdict, confidence 0.1, raw response in audit trail; never an unhandled exception
 
-### Integration tests over unit tests — why?
+### Reconciliation Drift Detection
 
-41+ integration test scenarios with real PostgreSQL, mocked Stripe SDK, and mocked fraud engine. These test actual state transitions, ledger balance invariants, and multi-service interactions. A unit test for `calculateFee()` exists because it's a pure function — but testing that `markEligible()` correctly blocks a fraudulent payout requires the full service stack. Every integration test asserts `assertLedgerBalanced()` at the end.
+Hourly (24h window) and daily (all-time) reconciliation jobs compare internal payout state, ledger entries, and Stripe transfer records. The engine classifies drift into distinct categories:
+
+| Drift class | Description |
+|-------------|-------------|
+| Amount mismatch | Internal payout amount ≠ Stripe transfer amount |
+| Orphaned transfer | Transfer in Stripe, no matching payout row |
+| Reversed transfer | Transfer reversed in Stripe, ledger not updated |
+| Ledger imbalance | Three independent SQL checks: global Σdebits/Σcredits, per-transaction balance, orphaned entry scan |
+
+No auto-fix for ledger imbalances — the ledger is append-only. Corrections are reversal entries, never updates.
+
+---
+
+## LLM Agent Layer
+
+### Graph Topology
+
+```
+start → collect → reason ⇄ tool_executor → synthesize → audit → END
+```
+
+The `collect` node is deterministic — it always fetches transaction context, seller risk profile, and payout timeline in parallel before the LLM sees any input. This front-loads I/O, reduces required tool calls during reasoning, and bounds the blast radius of hallucinated tool arguments on the first turn.
+
+The `reason ⇄ tool_executor` loop is the ReAct pattern. The conditional edge after `reason` routes on three signals:
+
+1. LLM returned tool calls → execute them, loop back
+2. LLM response contains `INVESTIGATION_COMPLETE` → go to `synthesize`
+3. `iteration >= MAX_ITERATIONS` → force `synthesize` regardless of LLM output
+
+### Read-Only Tool Boundary
+
+All five agent tools are read-only HTTP calls. The agent cannot mutate payout state, ledger entries, or dispute records. Enforced structurally — the tool registry contains no write endpoints.
+
+| Tool | Endpoint | Reads |
+|------|----------|-------|
+| `get_transaction_context` | `GET /investigate/transaction/:id` | Transaction, payouts, ledger entries, disputes |
+| `get_seller_risk_profile` | `GET /admin/sellers/:id/risk-profile` | Account age, velocity, dispute rate, balance |
+| `get_payout_timeline` | `GET /admin/sellers/:id/payout-timeline` | Chronological payouts with trend analysis |
+| `check_ledger_consistency` | `GET /ledger/integrity` + `GET /ledger/balance/:id` | Global balance, per-account balance |
+| `get_fraud_score_explanation` | `POST /check/explain` | Rule-by-rule fraud score breakdown |
+
+Tools never raise exceptions into the graph. Every HTTP error (4xx, 5xx, connection failure) is caught and returned as a typed error dict `{ error: true, status_code, detail }`. The agent can reason about tool failures as evidence.
+
+### Audit Trail
+
+Every node appends a timestamped entry to `audit_trail` in the graph state:
+
+```
+investigation_started → context_collected → llm_reasoning (×N) → verdict_produced → investigation_complete
+```
+
+The full trail, verdict JSON, and iteration count are persisted to `InvestigationRun` (PostgreSQL). Audit entries are monotonically ordered — the E2E test suite asserts this property.
+
+### Testing Without an LLM Key
+
+The E2E suite (`tests/test_agent_e2e.py`) mocks the LLM with scripted tool-calling sequences. The mock returns a deterministic sequence: `tool_call → INVESTIGATION_COMPLETE → JSON verdict`. Everything else is real: graph routing, tool HTTP calls to a live NestJS server, PostgreSQL seed/teardown, httpx connections, audit trail ordering. CI runs without an OpenAI key.
 
 ---
 
 ## System Invariants
 
-These are enforced at runtime, not just by convention:
+Enforced at runtime:
 
-| Invariant | Enforcement | Failure Mode |
+| Invariant | Enforcement | Failure mode |
 |-----------|-------------|--------------|
-| Ledger always balances (Σ debits = Σ credits) | `verifyIntegrity()` SQL check, `assertLedgerBalanced()` in every integration test | Reconciliation alert |
-| Every transaction's entries sum to zero | `createTransaction()` validates before write | Throws, no write |
-| Ledger entries are immutable | No UPDATE on Entry table; corrections via reversal entries | Schema + code convention |
-| All financial writes in DB transaction | `prisma.$transaction()` wrapping all ledger + state changes | Atomic rollback |
-| Idempotent payment creation | Redis key with 24h TTL, checked before Stripe call | Returns cached result |
-| Payout state transitions are validated | `validateTransition()` checks allowed transitions map | 400 Bad Request |
-| Escrow balance checked before Stripe transfer | Balance query before `transfers.create()` | Payout → FAILED |
+| Σdebits = Σcredits globally | `verifyIntegrity()` SQL; `assertLedgerBalanced()` in every integration test | Reconciliation alert |
+| Per-transaction entries balance | `createTransaction()` validates before write | Throws, no write |
+| Ledger entries are immutable | No `UPDATE` on `Entry`; corrections via reversal entries | Schema + code |
+| All financial writes atomic | `prisma.$transaction()` wrapping every ledger + state change | Atomic rollback |
+| Idempotent payment creation | Redis (24h TTL) + DB `@unique` on `stripePaymentIntentId` | Cached result / unique-constraint rejection |
+| Payout transitions validated | `validateTransition()` checks allowed-transitions map | 400 Bad Request |
+| Concurrent overspend impossible | `SELECT FOR NO KEY UPDATE` inside `$transaction`, ascending id lock order | `Insufficient funds` error |
 | Fee split sums to original amount | `calculateFee()` invariant assertion | Throws |
-| Negative seller balance → automatic block | `updateSellerNegativeBalance()` after dispute reversal | `payoutsBlocked = true` |
+| Negative seller balance auto-blocks | `updateSellerNegativeBalance()` after dispute reversal | `payoutsBlocked = true` |
+| Agent cannot write to ledger | Tool registry contains read-only endpoints only | Structural enforcement |
 
 ---
 
 ## Failure Modes & Recovery
 
-| Scenario | What Happens | Recovery |
+| Scenario | What happens | Recovery |
 |----------|-------------|----------|
-| **Stripe transfer fails** | Payout → FAILED, ledger untouched (entries only created after successful transfer) | Auto-retry via BullMQ (max 3, exponential backoff) or manual `forceRetry` |
-| **Fraud engine down** | Fail-open: payout scored as REVIEW (0.5) | Payout queued for manual review; engine recovery clears backlog |
-| **Webhook arrives before payment intent created** | Transaction lookup returns null | Webhook logged and skipped; reconciliation catches it later |
-| **Duplicate webhook delivery** | Transaction already COMPLETED | Idempotent: status update is a no-op |
-| **Dispute on already-paid payout** | Payout reversed: mirror ledger entries, Stripe transfer reversal | If seller balance goes negative → `payoutsBlocked = true`, seller must settle |
-| **Dispute on unpaid payout** | Payout frozen (stays PENDING/ELIGIBLE) | Resolution unfreezes (WON) or cancels (LOST/REFUNDED) |
-| **Ledger imbalance detected** | `verifyIntegrity()` returns failing accounts/transactions | Manual investigation via admin endpoints; no auto-fix (immutable ledger) |
-| **Orphaned Stripe transfer** | Transfer exists in Stripe but no matching payout | Reconciliation flags for manual review |
-| **Redis down** | Idempotency checks fail (no cache) | Payments still process but lose duplicate protection; BullMQ jobs pause |
+| Stripe transfer fails | Payout → `FAILED`, ledger untouched | BullMQ auto-retry (max 3, exponential backoff) or manual `forceRetry` |
+| Fraud engine unreachable | Fail-open → payout scored `REVIEW` (0.5) | Manual release when engine recovers |
+| LLM synthesis malformed | Graph returns `INCONCLUSIVE`, confidence 0.1 | Human review; raw response in audit trail |
+| Webhook before payment intent | Transaction lookup null → skip | Reconciliation catches it |
+| Duplicate webhook | Transaction already `COMPLETED` | Idempotent no-op |
+| Dispute on paid payout | Reversal entries posted; seller may go negative → `payoutsBlocked = true` | Seller must settle; admin unblock |
+| Dispute on unpaid payout | Payout frozen at `PENDING/ELIGIBLE` | Unfreezes on `WON`; cancelled on `LOST/REFUNDED` |
+| Ledger imbalance detected | `verifyIntegrity()` returns failing transactions | Manual investigation; no auto-fix (immutable ledger) |
+| Orphaned Stripe transfer | In Stripe, no matching payout row | Reconciliation flags for manual review |
+| Redis down | Idempotency cache miss | Payments still process; DB unique-constraint still holds |
+| Agent hits iteration cap | `synthesize` forced at `MAX_ITERATIONS` | Graph always produces a verdict; `INCONCLUSIVE` if evidence thin |
 
 ---
 
 ## Test Coverage
 
-### Integration Tests (NestJS — `test/integration/`)
+**92 tests — all pass. `tsc --noEmit` clean.**
 
-Full lifecycle tests with real PostgreSQL, mocked Stripe SDK, mocked fraud engine. Every test runs `assertLedgerBalanced()` after execution.
+### Integration Tests (NestJS)
 
-| Scenario | What It Verifies |
-|----------|-----------------|
+Real PostgreSQL, mocked Stripe SDK, mocked fraud engine. Every test asserts `assertLedgerBalanced()` after execution.
+
+| Scenario | Verifies |
+|----------|---------|
 | Happy path: payment → payout → paid | Full money flow, ledger balances, Stripe transfer |
 | Duplicate webhook idempotency | Same webhook twice → single state change |
-| Fraud gate: ALLOW | Clean payout passes fraud check, reaches PAID |
-| Fraud gate: BLOCK | High-risk payout blocked at eligibility |
-| Fraud gate: REVIEW | Mid-risk payout flagged for manual review |
-| Fraud engine down (fail-open) | Engine timeout → REVIEW, not BLOCK |
-| Stripe transfer failure | Transfer throws → payout FAILED, ledger untouched |
-| Dispute: seller wins | Payout unfrozen, seller receives funds |
-| Dispute: buyer wins (reverse) | Payout reversed, mirror ledger entries |
-| Dispute: full refund | Escrow → buyer, payout reversed if paid |
-| Post-payout reversal | Reversal after PAID, seller balance may go negative |
-| Payment idempotency | Same idempotency key → cached result returned |
+| Fraud gate: ALLOW / REVIEW / BLOCK | All three decision paths |
+| Fraud engine down (fail-open) | Timeout → `REVIEW`, not `BLOCK` |
+| Stripe transfer failure | Transfer throws → payout `FAILED`, ledger untouched |
+| Dispute: WON / LOST / REFUNDED | All resolution paths + ledger reversal |
+| Post-payout reversal (negative balance) | `payoutsBlocked = true` enforced |
+| Payment idempotency | Same key → cached result |
+
+### Concurrency Tests (`ledger.concurrency.spec.ts`)
+
+Real PostgreSQL, 50 parallel operations, no mocks.
+
+| Scenario | Proves |
+|----------|-------|
+| 50 parallel credits | Σdebits = Σcredits, no dropped writes, no double-counts |
+| 30 parallel mixed debits/credits | No balance drift under contention |
+| 20 concurrent debits, 500-cent escrow | Exactly 5 succeed, 15 → `Insufficient funds`, final balance = 0 |
+| 15 parallel calls, shared idempotency key | Exactly 1 commit, 14 unique-constraint rejections |
+
+### Agent E2E Tests (`tests/test_agent_e2e.py`)
+
+Real NestJS server, real PostgreSQL, mocked LLM. 15 tests.
+
+| Class | Verifies |
+|-------|---------|
+| `TestAgentE2ECollectNode` | `collect_node` fetches real data, populates messages, records audit entry |
+| `TestAgentE2EToolsLive` | All 5 tools against live NestJS; 404 propagation; error dict shape |
+| `TestAgentE2EFullGraph` | Full graph traversal; iteration cap; 404 graceful handling |
+| `TestAgentE2EAuditTrail` | Chronological ordering; `transaction_id` in final entry |
 
 ### Unit Tests
 
 | Suite | Count | Focus |
 |-------|-------|-------|
-| Payout state machine | 10 | Valid/invalid transitions |
-| Dispute state machine | 9 | Valid/invalid transitions |
+| Payout state machine | 10 | Valid/invalid transition enforcement |
+| Dispute state machine | 9 | Valid/invalid transition enforcement |
 | Ledger service | 8 | Balance calculation, fee split, reversal, insufficient funds |
 | Fee calculation | 7 | Float edge cases, invariant enforcement |
-
-### Fraud Engine Tests (Python — `pytest`)
-
-16 tests: individual rule checks (velocity, amount, new account), scoring thresholds (ALLOW/REVIEW/BLOCK), API contract validation.
+| Fraud engine rules (Python — pytest) | 16 | Individual rules, scoring thresholds, API contract |
 
 ---
 
@@ -193,16 +270,18 @@ Full lifecycle tests with real PostgreSQL, mocked Stripe SDK, mocked fraud engin
 
 | Module | Path | Purpose |
 |--------|------|---------|
-| Ledger | `src/ledger/` | Double-entry bookkeeping, balance queries, integrity checks |
+| Ledger | `src/ledger/` | Double-entry bookkeeping, balance queries, integrity checks, concurrency |
 | Payment | `src/payment/` | Stripe PaymentIntent creation, idempotent intake |
 | Payout | `src/payout/` | Full payout lifecycle, fraud gate, Stripe transfers, retry |
 | Fraud | `src/fraud/` | HTTP client to Python fraud engine, fail-open fallback |
 | Dispute | `src/dispute/` | Chargeback handling, payout freeze/reverse/refund |
 | Seller | `src/seller/` | Stripe Connect onboarding, KYC sync |
-| Webhook | `src/webhook/` | Stripe event processing (payment, account, dispute) |
-| Queue | `src/queue/` | BullMQ async payout processing, daily cron |
-| Reconciliation | `src/reconciliation/` | Stripe ↔ ledger ↔ DB sync, orphan detection |
-| Admin | `src/admin/` | Payout stats, failed/blocked lists, force-retry, reversal |
+| Webhook | `src/webhook/` | Stripe event processing (signed, idempotent on event.id) |
+| Queue | `src/queue/` | BullMQ async payout processing, daily cron, DLQ visibility |
+| Reconciliation | `src/reconciliation/` | Stripe ↔ ledger ↔ DB sync, drift classification |
+| Admin | `src/admin/` | Seller risk profiles, payout timelines, force-retry, reversal |
+| Investigation | `src/investigation/` | Per-transaction and per-payout investigation reports |
+| Agent | `fraud-engine/agent/` | LangGraph ReAct agent, read-only tools, audit persistence |
 
 ---
 
@@ -277,9 +356,9 @@ See `.env.example`. Key variables:
 
 ## Production Notes
 
-Things this system intentionally does not include (and why):
+Intentional omissions:
 
-- **Auth/RBAC** — Solved problem. Complexity budget spent on financial correctness.
-- **UUIDs for public IDs** — Autoincrement used for development speed. Production migration is straightforward.
-- **NestJS ConfigModule** — `process.env` used directly. ConfigModule adds ceremony without improving correctness for this scope.
-- **Separate agents per domain** — The investigation agent covers the full ops narrative. Separate reconciliation/payout/dispute agents would fragment the same data access pattern.
+- **Auth/RBAC** — Solved problem. Complexity budget spent on financial correctness, concurrency, and agent reliability.
+- **UUIDs for public IDs** — Autoincrement used for development speed. Migration is straightforward.
+- **NestJS ConfigModule** — `process.env` used directly. ConfigModule adds ceremony without improving correctness at this scope.
+- **LLM provider abstraction** — Agent uses OpenAI via LangChain. Swapping providers is a one-line config change (`AGENT_LLM_MODEL`); graph and tools are provider-agnostic.
