@@ -192,3 +192,39 @@ model Dispute {
   @@index([status])
   @@index([transactionId])
 }
+
+model InvestigationRun {
+  id             Int      @id @default(autoincrement())
+  transactionId  Int
+  trigger        String
+  verdict        String?
+  confidence     Float?
+  riskLevel      String?
+  summary        String?
+  verdictPayload Json?
+  toolCalls      Json?
+  createdAt      DateTime @default(now())
+  completedAt    DateTime @default(now())
+
+  auditEntries   InvestigationAuditEntry[]
+
+  @@index([transactionId])
+  @@index([verdict])
+  @@index([completedAt])
+}
+
+model InvestigationAuditEntry {
+  id        Int              @id @default(autoincrement())
+  run       InvestigationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  runId     Int
+  sequence  Int
+  timestamp DateTime
+  action    String
+  stage     String?
+  payload   Json
+  createdAt DateTime         @default(now())
+
+  @@unique([runId, sequence])
+  @@index([runId])
+  @@index([action])
+}

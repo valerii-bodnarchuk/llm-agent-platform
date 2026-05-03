@@ -11,6 +11,8 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from agent.rag.store import LocalCaseStore, SimilarCaseQuery
+from agent.rag.indexer import build_case_from_run, index_completed_investigations
+from agent.persistence.audit import persist_investigation_run
 from agent.tools.registry import ALL_TOOLS
 from agent.tools.similar_cases import find_similar_cases
 
@@ -72,6 +74,103 @@ def test_ranked_matching_returns_most_relevant_case_first():
     assert result["cases"][0]["case_id"] == "case_amount_threshold_false_positive"
     assert result["cases"][0]["verdict"] == "FALSE_POSITIVE"
     assert "rule:amount_threshold" in result["cases"][0]["matched_signals"]
+
+
+def test_local_store_loads_indexed_cases(tmp_path):
+    index_path = tmp_path / "indexed_cases.json"
+    store = LocalCaseStore(cases=[], index_path=index_path)
+    assert store.search(SimilarCaseQuery(
+        transaction_id=99,
+        fraud_decision="BLOCK",
+        fraud_score=0.75,
+        findings=["velocity"],
+    )) == {"cases": [], "count": 0}
+
+    index_path.write_text(json.dumps({
+        "cases": [
+            {
+                "case_id": "run_42",
+                "verdict": "TRUE_POSITIVE",
+                "risk_level": "HIGH",
+                "summary": "Persisted velocity investigation.",
+                "signals": ["decision:BLOCK", "rule:velocity", "risk:high"],
+                "recommended_actions": ["Keep payout blocked."],
+            }
+        ],
+    }))
+
+    result = store.search(SimilarCaseQuery(
+        transaction_id=99,
+        fraud_decision="BLOCK",
+        fraud_score=0.75,
+        findings=["velocity"],
+    ))
+
+    assert result["count"] == 1
+    assert result["cases"][0]["case_id"] == "run_42"
+
+
+def test_build_case_from_run_extracts_normalized_signals():
+    case = build_case_from_run({
+        "id": 7,
+        "transactionId": 123,
+        "verdict": "TRUE_POSITIVE",
+        "riskLevel": "HIGH",
+        "summary": "Velocity and failed history investigation.",
+        "verdictPayload": {
+            "summary": "Velocity spike with failed_history signals.",
+            "key_findings": ["amount threshold also triggered"],
+            "recommended_actions": ["Keep payout blocked."],
+        },
+        "toolCalls": [
+            {
+                "args": {
+                    "fraud_decision": "BLOCK",
+                    "fraud_score": 0.81,
+                    "findings": ["velocity"],
+                },
+            }
+        ],
+        "completedAt": "2026-05-03T00:00:00",
+    })
+
+    assert case["case_id"] == "run_7"
+    assert case["transaction_id"] == 123
+    assert "decision:BLOCK" in case["signals"]
+    assert "risk:high" in case["signals"]
+    assert "rule:velocity" in case["signals"]
+    assert "rule:failed_history" in case["signals"]
+    assert "rule:amount_threshold" in case["signals"]
+
+
+@pytest.mark.asyncio
+async def test_persist_investigation_run_skips_without_database_url():
+    result = await persist_investigation_run(
+        {
+            "transaction_id": 123,
+            "trigger": "MANUAL",
+            "verdict": {"verdict": "INCONCLUSIVE", "confidence": 0.1},
+            "messages": [],
+        },
+        [{"timestamp": "2026-05-03T00:00:00+00:00", "action": "investigation_complete"}],
+        database_url="",
+    )
+
+    assert result == {"persisted": False, "reason": "DATABASE_URL not configured"}
+
+
+@pytest.mark.asyncio
+async def test_index_completed_investigations_skips_without_database_url(tmp_path):
+    result = await index_completed_investigations(
+        database_url="",
+        output_path=tmp_path / "indexed_cases.json",
+    )
+
+    assert result == {
+        "indexed": 0,
+        "written": False,
+        "reason": "DATABASE_URL not configured",
+    }
 
 
 @pytest.mark.asyncio
@@ -158,4 +257,3 @@ async def test_graph_executes_mocked_llm_similar_cases_tool_call():
     ]
     assert tool_messages
     assert "case_amount_threshold_false_positive" in tool_messages[0].content
-

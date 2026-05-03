@@ -18,6 +18,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from agent.config import MAX_ITERATIONS, OPENAI_MODEL
 from agent.prompts import REACT_SYSTEM_PROMPT, SYNTHESIS_PROMPT
+from agent.persistence.audit import persist_investigation_run
 from agent.state import InvestigationState
 from agent.tools.nestjs_client import nestjs_get
 from agent.tools.registry import ALL_TOOLS
@@ -299,11 +300,15 @@ async def audit_node(state: InvestigationState) -> dict:
     }
 
     full_trail = trail + [final_entry]
+    state_for_persistence = dict(state)
+    state_for_persistence["audit_trail"] = full_trail
+    persist_result = await persist_investigation_run(state_for_persistence, full_trail)
 
     logger.info(
         json.dumps({
             "audit_trail": full_trail,
             "transaction_id": state["transaction_id"],
+            "persistence": persist_result,
         }, default=str)
     )
 
