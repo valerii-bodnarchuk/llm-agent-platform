@@ -8,6 +8,7 @@ import logging
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger("agent.api")
@@ -63,6 +64,29 @@ async def investigate(req: InvestigateRequest):
         verdict=verdict,
         audit_trail=result.get("audit_trail", []),
         iterations_used=result.get("iteration", 0),
+    )
+
+
+@router.post("/stream")
+async def investigate_stream(req: InvestigateRequest):
+    """Stream the same investigation as POST /investigate, but emit one
+    Server-Sent Event per LangGraph node delta plus a terminal `done` event.
+
+    Persistence is unchanged: audit_node still writes the run to PostgreSQL at
+    the end. The stream is additive observability, not a replacement for the
+    durable record.
+    """
+    from agent.streaming import stream_investigation
+
+    return StreamingResponse(
+        stream_investigation(req.transaction_id, req.trigger),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            # Disable proxy buffering so events flush as the graph progresses
+            # instead of arriving as one chunk at the end.
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
