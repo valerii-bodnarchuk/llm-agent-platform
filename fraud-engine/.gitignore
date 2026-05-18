@@ -1,4 +1,9 @@
 venv/
+notebooks/venv/
 __pycache__/
 *.pyc
 .env
+data/
+ieee-fraud-detection.zip
+app/ml/artifacts/
+notebooks/train_run.log
