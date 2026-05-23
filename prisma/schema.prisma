@@ -228,3 +228,25 @@ model InvestigationAuditEntry {
   @@index([runId])
   @@index([action])
 }
+
+/// Unified retrievable case corpus: SEED_CASES (source='seed') unioned with
+/// projections of completed InvestigationRun rows (source='run'). The
+/// embedding column uses pgvector; Prisma sees it as Unsupported and does not
+/// manage it, while raw SQL on the Python side reads/writes it directly.
+model Case {
+  id                 Int      @id @default(autoincrement())
+  caseId             String   @unique
+  source             String
+  runId              Int?
+  verdict            String
+  riskLevel          String
+  summary            String
+  signals            String[]
+  recommendedActions Json     @default("[]")
+  embedding          Unsupported("vector(384)")?
+  createdAt          DateTime @default(now())
+
+  @@index([source])
+  @@index([verdict])
+  @@index([runId])
+}

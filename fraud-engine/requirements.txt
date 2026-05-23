@@ -9,3 +9,6 @@ langgraph>=0.2.0
 langchain-core>=0.3.0
 langchain-openai>=0.2.0
 pytest-asyncio
+tenacity
+pgvector
+sentence-transformers>=2.7.0
