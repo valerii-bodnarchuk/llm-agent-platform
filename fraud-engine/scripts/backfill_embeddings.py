@@ -33,6 +33,7 @@ import asyncpg
 from pgvector.asyncpg import register_vector
 
 from agent.rag.cases import SEED_CASES
+from agent.rag.synthetic_cases import SYNTHETIC_CASES
 from agent.rag.embeddings import (
     DEFAULT_BATCH_SIZE,
     _canonical_text,
@@ -142,10 +143,13 @@ def _synthetic_summary(verdict_payload: dict, run_id: int) -> str:
     return f"Persisted investigation run #{run_id} — no narrative recorded."
 
 
-def _seed_case_to_row(case: dict) -> dict:
+def _python_case_to_row(case: dict, source: str) -> dict:
+    """Map a Python-dict case (SEED_CASES or SYNTHETIC_CASES) to a Case row.
+    `source` is recorded verbatim — 'seed' for production seeds, 'synthetic'
+    for evaluation fixtures — so the eval can stratify on it."""
     return {
         "caseId": case["case_id"],
-        "source": "seed",
+        "source": source,
         "runId": None,
         "verdict": case["verdict"],
         "riskLevel": str(case["risk_level"]).upper(),
@@ -205,10 +209,17 @@ async def main(batch_size: int, limit: int | None) -> dict:
 
         seed_candidates: list[dict] = []
         for c in SEED_CASES:
-            row = _seed_case_to_row(c)
+            row = _python_case_to_row(c, "seed")
             if row["caseId"] in existing:
                 continue
             seed_candidates.append(row)
+
+        synthetic_candidates: list[dict] = []
+        for c in SYNTHETIC_CASES:
+            row = _python_case_to_row(c, "synthetic")
+            if row["caseId"] in existing:
+                continue
+            synthetic_candidates.append(row)
 
         run_rows = await _fetch_run_rows(conn, limit)
         logger.info("InvestigationRun rows fetched: %d", len(run_rows))
@@ -220,25 +231,28 @@ async def main(batch_size: int, limit: int | None) -> dict:
                 continue
             run_candidates.append(row)
 
-        candidates = seed_candidates + run_candidates
+        candidates = seed_candidates + synthetic_candidates + run_candidates
         if not candidates:
             logger.info("Nothing to embed — all caseIds already present.")
             return {
                 "embedded_seed": 0,
+                "embedded_synthetic": 0,
                 "embedded_run": 0,
                 "skipped_existing": len(existing),
                 "total_in_table": len(existing),
             }
 
         logger.info(
-            "Embedding %d cases (%d seed, %d run) in batches of %d...",
+            "Embedding %d cases (%d seed, %d synthetic, %d run) in batches of %d...",
             len(candidates),
             len(seed_candidates),
+            len(synthetic_candidates),
             len(run_candidates),
             batch_size,
         )
 
         embedded_seed = 0
+        embedded_synthetic = 0
         embedded_run = 0
         n_batches = (len(candidates) + batch_size - 1) // batch_size
 
@@ -268,26 +282,33 @@ async def main(batch_size: int, limit: int | None) -> dict:
                     )
                     if case_row["source"] == "seed":
                         embedded_seed += 1
+                    elif case_row["source"] == "synthetic":
+                        embedded_synthetic += 1
                     else:
                         embedded_run += 1
 
             logger.info(
-                "  Batch %d/%d committed (cumulative seed=%d run=%d)",
+                "  Batch %d/%d committed (cumulative seed=%d synthetic=%d run=%d)",
                 i // batch_size + 1,
                 n_batches,
                 embedded_seed,
+                embedded_synthetic,
                 embedded_run,
             )
 
-        total_now = len(existing) + embedded_seed + embedded_run
+        total_now = (
+            len(existing) + embedded_seed + embedded_synthetic + embedded_run
+        )
         logger.info(
-            "Embedded %d seed cases, %d run cases (total in table: %d)",
+            "Embedded %d seed cases, %d synthetic cases, %d run cases (total in table: %d)",
             embedded_seed,
+            embedded_synthetic,
             embedded_run,
             total_now,
         )
         return {
             "embedded_seed": embedded_seed,
+            "embedded_synthetic": embedded_synthetic,
             "embedded_run": embedded_run,
             "skipped_existing": len(existing),
             "total_in_table": total_now,
