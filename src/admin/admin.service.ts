@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LedgerService } from '../ledger/ledger.service';
 
@@ -8,6 +8,93 @@ export class AdminService {
     private prisma: PrismaService,
     private ledger: LedgerService,
   ) {}
+
+  async seedScenario(scenario: 'healthy' | 'problematic') {
+    if (process.env.NODE_ENV === 'production') {
+      throw new ForbiddenException('Dev seed is disabled in production');
+    }
+
+    // Always use the seeded test seller (id=1). Re-seed if missing.
+    let seller = await this.prisma.seller.findFirst();
+    if (!seller) {
+      throw new NotFoundException('No seller found — run npm run prisma:seed first');
+    }
+
+    if (scenario === 'healthy') {
+      const tx = await this.prisma.transaction.create({
+        data: { status: 'COMPLETED', description: 'Dev seed: healthy payout' },
+      });
+      const payout = await this.prisma.payout.create({
+        data: {
+          status: 'ELIGIBLE',
+          amount: 4500,
+          platformFee: 225,
+          sellerAmount: 4275,
+          attempts: 0,
+          maxAttempts: 3,
+          transactionId: tx.id,
+          sellerId: seller.id,
+          escrowAccountId: 1,
+          platformFeeAccountId: 2,
+          fraudScore: 0.12,
+          fraudDecision: 'ALLOW',
+        },
+      });
+      return {
+        scenario: 'healthy',
+        payoutId: payout.id,
+        investigateUrl: `/investigate/payout/${payout.id}`,
+        summary: 'ELIGIBLE payout, fraud ALLOW (score 0.12), no disputes',
+      };
+    }
+
+    // Problematic: fraud BLOCK + max retries + FAILED + active dispute + seller blocked
+    const tx = await this.prisma.transaction.create({
+      data: { status: 'COMPLETED', description: 'Dev seed: problematic payout' },
+    });
+
+    const payout = await this.prisma.payout.create({
+      data: {
+        status: 'FAILED',
+        amount: 25000,
+        platformFee: 1250,
+        sellerAmount: 23750,
+        attempts: 3,
+        maxAttempts: 3,
+        failureReason: 'stripe_transfer_declined: account restricted',
+        lastAttemptAt: new Date(),
+        transactionId: tx.id,
+        sellerId: seller.id,
+        escrowAccountId: 1,
+        platformFeeAccountId: 2,
+        fraudScore: 0.87,
+        fraudDecision: 'BLOCK',
+      },
+    });
+
+    await this.prisma.dispute.create({
+      data: {
+        status: 'OPEN',
+        reason: 'FRAUDULENT',
+        amount: 25000,
+        description: 'Buyer claims unauthorized transaction',
+        transactionId: tx.id,
+        payoutId: payout.id,
+      },
+    });
+
+    await this.prisma.seller.update({
+      where: { id: seller.id },
+      data: { payoutsBlocked: true },
+    });
+
+    return {
+      scenario: 'problematic',
+      payoutId: payout.id,
+      investigateUrl: `/investigate/payout/${payout.id}`,
+      summary: 'FAILED payout, fraud BLOCK (score 0.87), 3/3 retries, OPEN dispute, seller blocked',
+    };
+  }
 
   /**
    * Aggregate all risk-relevant data for a seller into a single response.

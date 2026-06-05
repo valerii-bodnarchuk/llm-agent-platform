@@ -21,6 +21,30 @@ export class AdminController {
     private adminService: AdminService,
   ) {}
 
+  // ── Dev seed ──────────────────────────────────────────────────
+
+  @Post('dev/seed-scenario')
+  @ApiOperation({
+    summary: '[DEV] Seed a test payout scenario',
+    description:
+      'Creates a fully wired payout scenario (transaction + payout + dispute + seller state) ' +
+      'and returns the payout ID ready to pass to `GET /investigate/payout/{id}`. ' +
+      '**Disabled in production.** Use `scenario=problematic` to trigger all investigation rules ' +
+      '(fraud BLOCK, max retries, FAILED, active dispute, seller blocked) or `scenario=healthy` ' +
+      'for a clean baseline.',
+  })
+  @ApiQuery({
+    name: 'scenario',
+    required: false,
+    enum: ['healthy', 'problematic'],
+    description: 'Which scenario to seed (default: problematic)',
+  })
+  async seedScenario(
+    @Query('scenario') scenario: 'healthy' | 'problematic' = 'problematic',
+  ) {
+    return this.adminService.seedScenario(scenario);
+  }
+
   // ── Existing endpoints ────────────────────────────────────────
 
   @Get('stats')
