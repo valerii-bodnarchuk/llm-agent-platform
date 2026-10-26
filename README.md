@@ -367,34 +367,43 @@ Real NestJS server, real PostgreSQL, mocked LLM. 15 tests.
 
 ---
 
-## Quick Start
+## Run Locally
 
 ### Prerequisites
 
 - Node.js 20+
-- Docker & Docker Compose
+- Docker with Compose v2
+- Python 3.13 (fraud engine and agent only)
 
-### Local Development
+### API (NestJS)
 
 ```bash
-# Start infrastructure (PostgreSQL + Redis)
+# 1. Infrastructure: PostgreSQL 16 + pgvector, Redis 7, Jaeger
 npm run docker:dev
 
-# Configure environment
+# 2. Environment — .env.example defaults match docker-compose.dev.yml.
+#    The Nest app reads process.env only and does not load .env itself, so export it.
 cp .env.example .env
-# Edit .env with your Stripe keys
+set -a; . ./.env; set +a
 
-# Install, generate, migrate, seed
-npm install
+# 3. Install, generate client, migrate, seed
+npm ci
 npx prisma generate
 npx prisma migrate deploy
 npx prisma db seed
 
-# Start dev server
+# 4. Start with hot reload
 npm run start:dev
 ```
 
-Swagger: http://localhost:3000/api
+- Swagger UI: http://localhost:3000/api
+- Health: http://localhost:3000/health
+
+The placeholder Stripe values in `.env.example` are enough to boot the API and browse Swagger. Endpoints that call Stripe need a real test-mode key (`sk_test_…`).
+
+Stop infrastructure with `npm run docker:dev:down`.
+
+![Swagger UI](docs/swagger.png)
 
 ### Fraud Engine
 
@@ -428,7 +437,7 @@ See `.env.example`. Key variables:
 | Variable | Purpose |
 |----------|---------|
 | `DATABASE_URL` | PostgreSQL connection string |
-| `REDIS_URL` | Redis connection (production) |
+| `REDIS_URL` | Redis connection string; takes precedence over host/port |
 | `REDIS_HOST` / `REDIS_PORT` | Redis connection (local dev) |
 | `STRIPE_SECRET_KEY` | Stripe API key |
 | `STRIPE_WEBHOOK_SECRET` | Webhook signature verification |

@@ -225,7 +225,7 @@ Payments: `Account`, `Transaction`, `Entry`, `Payout`, `Seller`, `Dispute`. Agen
 | Variable | Consumer | Default |
 |----------|----------|---------|
 | `DATABASE_URL` | NestJS/Prisma + agent persistence + eval | — |
-| `REDIS_HOST` / `REDIS_PORT` (or `REDIS_URL` in prod) | NestJS | localhost:6379 |
+| `REDIS_HOST` / `REDIS_PORT` (or `REDIS_URL`, which takes precedence) | NestJS | localhost:6379 |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | NestJS | — |
 | `FRAUD_ENGINE_URL` | NestJS `FraudService` | `http://localhost:8000` |
 | `LOG_LEVEL`, `PORT` | NestJS | `info`, `3000` |
